@@ -52,16 +52,18 @@ if (process.env.NEXT_PUBLIC_MEDIA_CDN_HOST) {
  * nonce (a nonce forces dynamic rendering, which would disable ISR site-wide and
  * is the single most expensive thing we could do on Amplify Hosting compute).
  *
- * Public routes therefore get this static policy, and `src/middleware.ts` layers
- * a strict nonce-based policy over the already-dynamic /admin, /account, /auth
- * and /preview routes. See docs/architecture.md.
+ * All routes therefore use this static policy. Sensitive operations remain
+ * protected at the Cognito/AppSync authorization boundary, and private routes
+ * also receive noindex headers. See docs/architecture.md.
  */
 const PUBLIC_CSP = [
   "default-src 'self'",
   // 'unsafe-inline' is required: Next streams the RSC payload as inline
   // self.__next_f.push() calls whose hashes change every render.
   // Trusted Types (report-only, below) is the compensating control.
-  "script-src 'self' 'unsafe-inline'",
+  process.env.NODE_ENV === 'development'
+    ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+    : "script-src 'self' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",

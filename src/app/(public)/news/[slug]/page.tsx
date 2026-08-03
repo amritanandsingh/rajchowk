@@ -1,11 +1,18 @@
 import type { Metadata } from 'next'
+import Image from 'next/image'
 import { notFound, permanentRedirect } from 'next/navigation'
 import { ArticleBody, ArticleMeta } from '@/components/editorial/article-body'
+import { CommentsSection } from '@/components/editorial/comments-section'
 import { JsonLd } from '@/components/seo/json-ld'
-import { SkipLink } from '@/components/ui/skip-link'
-import { getArticleBySlug, getSlugRedirect, listPublishedArticles } from '@/lib/amplify/queries'
+import {
+  getArticleBySlug,
+  getSlugRedirect,
+  listApprovedComments,
+  listPublishedArticles,
+} from '@/lib/amplify/queries'
 import { absoluteUrl, env } from '@/lib/env'
 import { DEFAULT_LOCALE, getDictionary, OG_LOCALES } from '@/lib/i18n'
+import { mediaUrl } from '@/lib/media'
 import { buildArticleLd, buildBreadcrumbLd } from '@/lib/seo/jsonld'
 
 /**
@@ -40,7 +47,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     return { title: 'नहीं मिला', robots: { index: false, follow: false } }
   }
 
-  const path = `/news/${article.slug}`
+  const path = `${article.contentType === 'OPINION' ? '/opinion' : '/news'}/${article.slug}`
   const locale = article.language === 'EN' ? 'en' : 'hi'
   const imageUrl = article.socialImageKey ?? article.heroImageKey ?? undefined
 
@@ -92,12 +99,12 @@ export default async function NewsArticlePage({ params }: Props) {
   // Canonicalise: an old-but-still-resolving slug redirects to the current one.
   if (article.slug !== slug) permanentRedirect(`/news/${article.slug}`)
 
-  const path = `/news/${article.slug}`
+  const path = `${article.contentType === 'OPINION' ? '/opinion' : '/news'}/${article.slug}`
+  const heroImage = mediaUrl(article.heroImageKey)
+  const { items: comments } = await listApprovedComments(article.id, { limit: 20 })
 
   return (
     <>
-      <SkipLink targetId="content" label={dict.nav.skipToContent} />
-
       <JsonLd
         data={[
           buildArticleLd(article, {
@@ -124,7 +131,33 @@ export default async function NewsArticlePage({ params }: Props) {
             </div>
           </header>
 
+          {heroImage && (
+            <figure className="mb-8">
+              <div className="relative aspect-video overflow-hidden rounded-card bg-bg-subtle">
+                <Image
+                  src={heroImage}
+                  alt={article.heroImageAlt ?? ''}
+                  fill
+                  priority
+                  sizes="(min-width: 768px) 768px, 100vw"
+                  className="object-cover"
+                />
+              </div>
+              {article.heroImageCredit && (
+                <figcaption className="mt-2 text-xs text-fg-muted">
+                  {article.heroImageCredit}
+                </figcaption>
+              )}
+            </figure>
+          )}
+
           <ArticleBody article={article} dict={dict} />
+          <CommentsSection
+            articleId={article.id}
+            comments={comments}
+            allowComments={article.allowComments !== false}
+            dict={dict}
+          />
         </article>
       </main>
     </>

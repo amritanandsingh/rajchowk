@@ -190,6 +190,8 @@ export const en: Dictionary = {
     breakingNews: 'Breaking news',
     mainNavigation: 'Main navigation',
     footerNavigation: 'Footer navigation',
+    footerSections: 'Footer sections',
+    footerInformation: 'Footer information',
     userMenu: 'User menu',
     playVideo: 'Play: {title}',
   },

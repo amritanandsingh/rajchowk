@@ -138,9 +138,7 @@ export function groupsFromIdToken(idToken: string): string[] {
 
 export async function deleteUser(username: string): Promise<void> {
   try {
-    await cognito.send(
-      new AdminDeleteUserCommand({ UserPoolId: userPoolId(), Username: username }),
-    )
+    await cognito.send(new AdminDeleteUserCommand({ UserPoolId: userPoolId(), Username: username }))
   } catch (error) {
     // Teardown must never fail the run.
     if ((error as Error).name !== 'UserNotFoundException') {

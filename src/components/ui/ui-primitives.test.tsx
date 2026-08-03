@@ -81,7 +81,9 @@ describe('Button', () => {
 
   it('renders a visible focus ring for keyboard users', () => {
     const { container } = render(<Button>x</Button>)
-    expect((container.firstElementChild as HTMLElement).className).toContain('focus-visible:outline')
+    expect((container.firstElementChild as HTMLElement).className).toContain(
+      'focus-visible:outline',
+    )
   })
 
   it('honours prefers-reduced-motion on its transition', () => {

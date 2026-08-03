@@ -85,9 +85,7 @@ describe('EditorialBadge', () => {
   })
 
   it('accepts an extra className without dropping its own styling', () => {
-    const { container } = render(
-      <EditorialBadge kind="OPINION" dict={dict} className="mt-4" />,
-    )
+    const { container } = render(<EditorialBadge kind="OPINION" dict={dict} className="mt-4" />)
     const badge = container.firstElementChild as HTMLElement
     expect(badge.className).toContain('mt-4')
     expect(badge.className).toContain('rounded-full')

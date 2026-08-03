@@ -78,12 +78,14 @@ describe('::youtube', () => {
   })
 
   it('DROPS a directive pointing at a non-YouTube host', () => {
-    expect(wasDropped(transform(leaf('youtube', { url: `https://evil.com/watch?v=${VALID_ID}` })))).toBe(
-      true,
-    )
+    expect(
+      wasDropped(transform(leaf('youtube', { url: `https://evil.com/watch?v=${VALID_ID}` }))),
+    ).toBe(true)
     // A look-alike host must not slip through.
     expect(
-      wasDropped(transform(leaf('youtube', { url: `https://youtube.com.evil.com/watch?v=${VALID_ID}` }))),
+      wasDropped(
+        transform(leaf('youtube', { url: `https://youtube.com.evil.com/watch?v=${VALID_ID}` })),
+      ),
     ).toBe(true)
   })
 
@@ -144,10 +146,12 @@ describe('::figure', () => {
   })
 
   it('DROPS a data: or javascript: src', () => {
-    expect(wasDropped(transform(leaf('figure', { src: 'data:image/svg+xml,<svg/>', alt: 'a' })))).toBe(
+    expect(
+      wasDropped(transform(leaf('figure', { src: 'data:image/svg+xml,<svg/>', alt: 'a' }))),
+    ).toBe(true)
+    expect(wasDropped(transform(leaf('figure', { src: 'javascript:alert(1)', alt: 'a' })))).toBe(
       true,
     )
-    expect(wasDropped(transform(leaf('figure', { src: 'javascript:alert(1)', alt: 'a' })))).toBe(true)
   })
 })
 

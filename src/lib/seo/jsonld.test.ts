@@ -39,7 +39,7 @@ function article(overrides: Partial<PublicArticle> = {}): PublicArticle {
 
 describe('buildOrganizationLd', () => {
   it('declares a NewsMediaOrganization with a stable @id', () => {
-    const ld = buildOrganizationLd()
+    const ld = buildOrganizationLd() as unknown as Record<string, unknown>
     expect(ld['@type']).toBe('NewsMediaOrganization')
     expect(String(ld['@id'])).toMatch(/#organization$/)
   })
@@ -108,7 +108,9 @@ describe('buildArticleLd — subtype mapping', () => {
     ['FACT_CHECK', 'BackgroundNewsArticle'],
     ['INTERVIEW', 'ReportageNewsArticle'],
   ])('maps contentType %s to %s', (contentType, expected) => {
-    const ld = buildArticleLd(article({ contentType } as Partial<PublicArticle>), { path: '/news/x' })
+    const ld = buildArticleLd(article({ contentType } as Partial<PublicArticle>), {
+      path: '/news/x',
+    })
     expect(ld['@type']).toBe(expected)
   })
 
@@ -176,7 +178,9 @@ describe('buildArticleLd — fields', () => {
   it('nests a VideoObject when the article carries a video', () => {
     const ld = buildArticleLd(article({ youtubeVideoId: VIDEO_ID }), { path: '/n/x' })
     expect(ld.video).toMatchObject({ '@type': 'VideoObject' })
-    expect(String((ld.video as Record<string, string>).embedUrl)).toContain('youtube-nocookie.com')
+    expect(String((ld.video as unknown as Record<string, string>).embedUrl)).toContain(
+      'youtube-nocookie.com',
+    )
   })
 
   it('references the author by @id when a slug is known, else inlines a Person', () => {
@@ -215,7 +219,11 @@ describe('buildVideoLd', () => {
   })
 
   it('truncates name and description', () => {
-    const ld = buildVideoLd({ videoId: VIDEO_ID, name: 'क'.repeat(300), description: 'ख'.repeat(900) })
+    const ld = buildVideoLd({
+      videoId: VIDEO_ID,
+      name: 'क'.repeat(300),
+      description: 'ख'.repeat(900),
+    })
     expect(String(ld.name).length).toBe(110)
     expect(String(ld.description).length).toBe(500)
   })
@@ -228,7 +236,11 @@ describe('buildBreadcrumbLd', () => {
       { name: 'ताज़ा', path: '/latest' },
       { name: 'लेख', path: '/news/x' },
     ])
-    const items = ld.itemListElement as Array<{ position: number; name: string; item: string }>
+    const items = ld.itemListElement as unknown as ReadonlyArray<{
+      position: number
+      name: string
+      item: string
+    }>
 
     expect(items.map((entry) => entry.position)).toEqual([1, 2, 3])
     expect(items.map((entry) => entry.name)).toEqual(['होम', 'ताज़ा', 'लेख'])
@@ -238,14 +250,16 @@ describe('buildBreadcrumbLd', () => {
   })
 
   it('handles a single crumb and an empty list', () => {
-    expect((buildBreadcrumbLd([{ name: 'होम', path: '/' }]).itemListElement as unknown[]).length).toBe(1)
+    expect(
+      (buildBreadcrumbLd([{ name: 'होम', path: '/' }]).itemListElement as unknown[]).length,
+    ).toBe(1)
     expect((buildBreadcrumbLd([]).itemListElement as unknown[]).length).toBe(0)
   })
 })
 
 describe('@id consistency across builders', () => {
   it('uses the same organisation @id everywhere it is referenced', () => {
-    const orgId = buildOrganizationLd()['@id']
+    const orgId = (buildOrganizationLd() as unknown as Record<string, unknown>)['@id']
     const site = buildWebSiteLd() as unknown as { publisher: { '@id': string } }
     const person = buildPersonLd({ name: 'a', slug: 'a' }) as unknown as {
       worksFor: { '@id': string }

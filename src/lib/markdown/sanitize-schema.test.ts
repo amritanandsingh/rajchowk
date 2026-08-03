@@ -36,7 +36,21 @@ const DANGEROUS_TAGS = [
 
 describe('schemaFull', () => {
   it('allows the editorial tags an article actually needs', () => {
-    for (const tag of ['p', 'strong', 'em', 'h2', 'h3', 'a', 'ul', 'ol', 'li', 'blockquote', 'table', 'img', 'figure']) {
+    for (const tag of [
+      'p',
+      'strong',
+      'em',
+      'h2',
+      'h3',
+      'a',
+      'ul',
+      'ol',
+      'li',
+      'blockquote',
+      'table',
+      'img',
+      'figure',
+    ]) {
       expect(schemaFull.tagNames, tag).toContain(tag)
     }
   })
@@ -134,7 +148,17 @@ describe('schemaFull', () => {
 
 describe('schemaInline', () => {
   it('allows only inline formatting', () => {
-    expect(schemaInline.tagNames).toEqual(['p', 'br', 'strong', 'em', 'del', 'a', 'code', 'sup', 'sub'])
+    expect(schemaInline.tagNames).toEqual([
+      'p',
+      'br',
+      'strong',
+      'em',
+      'del',
+      'a',
+      'code',
+      'sup',
+      'sub',
+    ])
   })
 
   it('excludes headings, so a key fact cannot break the document outline', () => {

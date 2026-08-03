@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { GlobalSetupContext } from 'vitest/node'
+import type { TestProject } from 'vitest/node'
 import { assertNotProduction } from './harness/outputs'
 import { clearPersistedLedger, readPersistedLedger, sweep } from './harness/ledger'
 import { createUser, deleteUser, ROLES, type Role, type TestUser } from './harness/users'
@@ -23,7 +23,7 @@ declare module 'vitest' {
   }
 }
 
-export default async function setup({ provide }: GlobalSetupContext) {
+export default async function setup({ provide }: TestProject) {
   // These tests create and delete real data, so refuse outright if the deployed
   // outputs claim to be production.
   assertNotProduction()

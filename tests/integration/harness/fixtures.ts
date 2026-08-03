@@ -47,7 +47,7 @@ export async function makeCategory(admin: Client): Promise<{ id: string; slug: s
  */
 export async function makeArticle(
   admin: Client,
-  options: { categoryId: string; authorProfileId: string; title?: string; allowComments?: boolean } ,
+  options: { categoryId: string; authorProfileId: string; title?: string; allowComments?: boolean },
 ): Promise<ArticleFixture> {
   const slug = `it-article-${short()}`
   const created = expectOk(
