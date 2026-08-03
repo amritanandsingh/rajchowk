@@ -68,10 +68,14 @@ export async function eventuallyDefined<T>(
   read: () => Promise<T | undefined | null>,
   options: EventuallyOptions = {},
 ): Promise<T> {
-  const value = await eventually(read, (candidate) => candidate !== undefined && candidate !== null, {
-    ...options,
-    label: options.label ?? 'value present',
-  })
+  const value = await eventually(
+    read,
+    (candidate) => candidate !== undefined && candidate !== null,
+    {
+      ...options,
+      label: options.label ?? 'value present',
+    },
+  )
   return value as T
 }
 

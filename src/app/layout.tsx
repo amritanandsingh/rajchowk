@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from 'next'
 import type { ReactNode } from 'react'
 import { Providers } from '@/components/providers'
+import { SiteFooter } from '@/components/site/site-footer'
+import { SiteHeader } from '@/components/site/site-header'
 import { ThemeScript } from '@/components/theme-script'
 import { absoluteUrl, env } from '@/lib/env'
 import { DEFAULT_LOCALE, getDictionary, LOCALE_TAGS, OG_LOCALES } from '@/lib/i18n'
@@ -60,7 +62,11 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <ThemeScript />
       </head>
       <body className="min-h-dvh bg-bg font-hindi text-fg antialiased">
-        <Providers initialLocale={DEFAULT_LOCALE}>{children}</Providers>
+        <Providers initialLocale={DEFAULT_LOCALE}>
+          <SiteHeader />
+          {children}
+          <SiteFooter />
+        </Providers>
       </body>
     </html>
   )

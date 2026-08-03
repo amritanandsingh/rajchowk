@@ -1,5 +1,5 @@
 import { Amplify } from 'aws-amplify'
-import { generateClient, type V6Client } from 'aws-amplify/data'
+import { generateClient, type Client as AmplifyClient } from 'aws-amplify/data'
 import type { Schema } from '@/../amplify/data/resource'
 import { amplifyOutputs } from './outputs'
 import type { Role, TestUser } from './users'
@@ -16,7 +16,7 @@ import type { Role, TestUser } from './users'
  * storage, which has no meaning in a Node test runner.
  */
 
-export type Client = V6Client<Schema>
+export type Client = AmplifyClient<Schema>
 
 let configured = false
 
@@ -93,7 +93,10 @@ export function clientsFor(users: Record<Role, TestUser>): Clients {
  * of these.
  * ------------------------------------------------------------------------ */
 
-type GraphQLish<T> = { data: T | null | undefined; errors?: Array<{ message: string; errorType?: string }> }
+type GraphQLish<T> = {
+  data: T | null | undefined
+  errors?: Array<{ message: string; errorType?: string }>
+}
 
 /** Unwrap a call that must succeed. Throws with the real error text if not. */
 export function expectOk<T>(result: GraphQLish<T>, label: string): T {

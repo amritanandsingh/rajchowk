@@ -1,11 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, inject } from 'vitest'
-import {
-  anonymousClient,
-  clientFor,
-  expectOk,
-  resultCode,
-  type Client,
-} from './harness/clients'
+import { anonymousClient, clientFor, expectOk, resultCode, type Client } from './harness/clients'
 import { counterOf, makePoll, openPoll, trackVote } from './harness/fixtures'
 import { resetRateLimitsForUser } from './harness/rate-limits'
 import { getRow } from './harness/tables'
@@ -144,7 +138,7 @@ describe('voting twice — the core guarantee', () => {
 
     expect(resultCode(changed)).toBe('ALREADY_VOTED')
     expect(await counterOf('PollOption', poll.optionIds[0]!, 'voteCount')).toBe(1)
-    expect(await counterOf('PollOption', poll.optionIds[1]!, 'voteCount') ?? 0).toBe(0)
+    expect((await counterOf('PollOption', poll.optionIds[1]!, 'voteCount')) ?? 0).toBe(0)
     expect(await counterOf('Poll', poll.id, 'totalVotes')).toBe(1)
   })
 })
@@ -195,7 +189,7 @@ describe('changing a vote', () => {
 
     // The counters reflect the last ALLOWED state.
     expect(await counterOf('PollOption', poll.optionIds[1]!, 'voteCount')).toBe(1)
-    expect(await counterOf('PollOption', poll.optionIds[2]!, 'voteCount') ?? 0).toBe(0)
+    expect((await counterOf('PollOption', poll.optionIds[2]!, 'voteCount')) ?? 0).toBe(0)
   })
 })
 
@@ -212,8 +206,8 @@ describe('rejected votes', () => {
     )
 
     expect(resultCode(result)).toBe('INVALID_OPTION')
-    expect(await counterOf('PollOption', pollB.optionIds[0]!, 'voteCount') ?? 0).toBe(0)
-    expect(await counterOf('Poll', pollA.id, 'totalVotes') ?? 0).toBe(0)
+    expect((await counterOf('PollOption', pollB.optionIds[0]!, 'voteCount')) ?? 0).toBe(0)
+    expect((await counterOf('Poll', pollA.id, 'totalVotes')) ?? 0).toBe(0)
   })
 
   it('refuses a poll that is not open', async () => {
@@ -259,7 +253,7 @@ describe('rejected votes', () => {
     })
 
     expect(result.errors?.length ?? 0).toBeGreaterThan(0)
-    expect(await counterOf('Poll', poll.id, 'totalVotes') ?? 0).toBe(0)
+    expect((await counterOf('Poll', poll.id, 'totalVotes')) ?? 0).toBe(0)
   })
 })
 

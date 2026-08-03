@@ -1,29 +1,29 @@
 import { describe, expect, it } from 'vitest'
-// @ts-expect-error — resolvers are plain .js with no type declarations.
+// @ts-expect-error: resolvers are plain .js with no type declarations.
 import * as articleFeed from './list-published-articles.js'
-// @ts-expect-error
+// @ts-expect-error: resolver is plain JavaScript with no type declaration.
 import * as categoryFeed from './list-published-articles-by-category.js'
-// @ts-expect-error
+// @ts-expect-error: resolver is plain JavaScript with no type declaration.
 import * as articleDetail from './get-published-article-1-article.js'
-// @ts-expect-error
+// @ts-expect-error: resolver is plain JavaScript with no type declaration.
 import * as articleSources from './get-published-article-2-sources.js'
-// @ts-expect-error
+// @ts-expect-error: resolver is plain JavaScript with no type declaration.
 import * as pollStage1 from './get-public-poll-1-poll.js'
-// @ts-expect-error
+// @ts-expect-error: resolver is plain JavaScript with no type declaration.
 import * as pollStage2 from './get-public-poll-2-options.js'
-// @ts-expect-error
+// @ts-expect-error: resolver is plain JavaScript with no type declaration.
 import * as comments from './list-approved-comments.js'
-// @ts-expect-error
+// @ts-expect-error: resolver is plain JavaScript with no type declaration.
 import * as questions from './list-approved-questions.js'
-// @ts-expect-error
+// @ts-expect-error: resolver is plain JavaScript with no type declaration.
 import * as liveEvents from './list-public-live-events.js'
-// @ts-expect-error
+// @ts-expect-error: resolver is plain JavaScript with no type declaration.
 import * as siteSettings from './get-public-site-settings.js'
 
 /**
  * The APPSYNC_JS public read surface.
  *
- * These ten resolvers ARE the authorization boundary for anonymous readers:
+ * These resolvers ARE the authorization boundary for anonymous readers:
  * the underlying models grant no public access at all, so everything a visitor
  * can see comes through here. They are plain `request`/`response` functions, so
  * they test with no AWS at all (`@aws-appsync/utils` is aliased to a stub in
@@ -39,7 +39,12 @@ import * as siteSettings from './get-public-site-settings.js'
  *     model later cannot leak through.
  */
 
-type Ctx = { args?: Record<string, unknown>; result?: unknown; error?: unknown; stash: Record<string, unknown> }
+type Ctx = {
+  args?: Record<string, unknown>
+  result?: unknown
+  error?: unknown
+  stash: Record<string, unknown>
+}
 
 const ctx = (over: Partial<Ctx> = {}): Ctx => ({ stash: {}, ...over })
 
@@ -91,9 +96,9 @@ describe('list-published-articles', () => {
   })
 
   it('validates language against an allow-list', () => {
-    expect(articleFeed.request(ctx({ args: { language: 'EN' } })).query.expressionValues[':pk']).toBe(
-      'PUBLISHED#EN',
-    )
+    expect(
+      articleFeed.request(ctx({ args: { language: 'EN' } })).query.expressionValues[':pk'],
+    ).toBe('PUBLISHED#EN')
     // Anything else falls back to Hindi rather than reaching a made-up partition.
     for (const language of ['DRAFT', 'HI#EN', '', null, undefined, 'xx', 1]) {
       const request = articleFeed.request(ctx({ args: { language } }))
@@ -224,7 +229,9 @@ describe('get-published-article-1-article', () => {
   )
 
   it('treats no match as not found', () => {
-    expect(() => articleDetail.response(ctx({ result: { items: [] } }))).toThrow(/Article not found/)
+    expect(() => articleDetail.response(ctx({ result: { items: [] } }))).toThrow(
+      /Article not found/,
+    )
     expect(() => articleDetail.response(ctx({ result: {} }))).toThrow(/Article not found/)
   })
 
@@ -255,7 +262,9 @@ describe('get-published-article-2-sources', () => {
   it('attaches the sources to the stashed article', () => {
     const context = ctx({
       stash: { article: { id: 'a1', sources: [] } },
-      result: { items: [{ id: 's1', title: 'स्रोत', url: 'https://example.com', displayOrder: 1 }] },
+      result: {
+        items: [{ id: 's1', title: 'स्रोत', url: 'https://example.com', displayOrder: 1 }],
+      },
     })
     const result = articleSources.response(context)
     expect(result.sources).toHaveLength(1)
@@ -286,11 +295,14 @@ describe('get-public-poll', () => {
     }
   })
 
-  it.each(['DRAFT', 'ARCHIVED'])('makes a %s poll indistinguishable from a missing one', (status) => {
-    expect(() => pollStage1.response(ctx({ result: { id: 'p1', status } }))).toThrow(
-      /Poll not found/,
-    )
-  })
+  it.each(['DRAFT', 'ARCHIVED'])(
+    'makes a %s poll indistinguishable from a missing one',
+    (status) => {
+      expect(() => pollStage1.response(ctx({ result: { id: 'p1', status } }))).toThrow(
+        /Poll not found/,
+      )
+    },
+  )
 
   it('attaches options with their counts, ordered', () => {
     const stage1 = ctx({ result: { id: 'p1', question: 'q', status: 'OPEN' } })
@@ -360,7 +372,13 @@ describe('list-approved-comments', () => {
         },
       }),
     )
-    for (const field of ['ipHash', 'contentHash', 'moderatedBySub', 'moderationNote', 'threadKey']) {
+    for (const field of [
+      'ipHash',
+      'contentHash',
+      'moderatedBySub',
+      'moderationNote',
+      'threadKey',
+    ]) {
       expect(result.items[0], field).not.toHaveProperty(field)
     }
     expect(result.items[0].content).toBe('टिप्पणी')
@@ -427,9 +445,9 @@ describe('list-public-live-events', () => {
   })
 
   it('validates language and clamps the limit', () => {
-    expect(liveEvents.request(ctx({ args: { language: 'zz' } })).query.expressionValues[':pk']).toBe(
-      'PUBLIC#HI',
-    )
+    expect(
+      liveEvents.request(ctx({ args: { language: 'zz' } })).query.expressionValues[':pk'],
+    ).toBe('PUBLIC#HI')
     expect(liveEvents.request(ctx({ args: { limit: 999 } })).limit).toBe(20)
   })
 
@@ -452,7 +470,11 @@ describe('get-public-site-settings', () => {
         result: {
           items: [
             { settingKey: 'BREAKING_NEWS', visibility: 'PUBLIC', valueJson: { text: 'खबर' } },
-            { settingKey: 'MODERATION_POLICY', visibility: 'INTERNAL', valueJson: { threshold: 3 } },
+            {
+              settingKey: 'MODERATION_POLICY',
+              visibility: 'INTERNAL',
+              valueJson: { threshold: 3 },
+            },
           ],
         },
       }),
@@ -488,7 +510,10 @@ describe('every resolver', () => {
 
   it.each(ALL)('%s surfaces a datasource error rather than swallowing it', (_name, mod) => {
     expect(() =>
-      mod.response({ stash: { article: { id: 'a' }, poll: { id: 'p' } }, error: { message: 'boom' } }),
+      mod.response({
+        stash: { article: { id: 'a' }, poll: { id: 'p' } },
+        error: { message: 'boom' },
+      }),
     ).toThrow()
   })
 })

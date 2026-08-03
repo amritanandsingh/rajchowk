@@ -74,7 +74,7 @@ const publicClient = generateClient<Schema>({ authMode: 'apiKey' })
  * queries cannot grant `allow.guest()`. See the long note in
  * amplify/data/resource.ts.
  *
- * The key reaches ten read-only content queries plus READ on Category, Tag and
+ * The key reaches the read-only content queries plus READ on Category, Tag and
  * ArticleRedirect. It has no access to Article, Comment, AudienceQuestion,
  * Vote or UserProfile — verified against the deployed backend by
  * `npm run verify:backend`, which asserts that a model list returns

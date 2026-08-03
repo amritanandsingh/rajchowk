@@ -17,7 +17,13 @@ const dict = getDictionary('hi')
 describe('LabeledBlock', () => {
   it('renders a landmark section wired to its own heading', () => {
     render(
-      <LabeledBlock id="what-happened" title="क्या हुआ" badge="VERIFIED_FACT" tone="fact" dict={dict}>
+      <LabeledBlock
+        id="what-happened"
+        title="क्या हुआ"
+        badge="VERIFIED_FACT"
+        tone="fact"
+        dict={dict}
+      >
         <p>सामग्री</p>
       </LabeledBlock>,
     )

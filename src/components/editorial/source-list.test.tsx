@@ -39,7 +39,9 @@ describe('SourceList', () => {
   })
 
   it('renders an ordered list, so citations are numbered', () => {
-    render(<SourceList sources={[source(), source({ id: 's2', title: 'दूसरा स्रोत' })]} dict={dict} />)
+    render(
+      <SourceList sources={[source(), source({ id: 's2', title: 'दूसरा स्रोत' })]} dict={dict} />,
+    )
     expect(screen.getByRole('list')).toBeInTheDocument()
     expect(screen.getAllByRole('listitem')).toHaveLength(2)
   })

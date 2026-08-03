@@ -1,13 +1,7 @@
 import { Logger } from '@aws-lambda-powertools/logger'
 import { GetCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb'
 import type { Schema } from '../../data/resource'
-import {
-  amplifyItem,
-  cancelledAt,
-  ddb,
-  isTransactionCancelled,
-  tableName,
-} from '../shared/ddb'
+import { amplifyItem, cancelledAt, ddb, isTransactionCancelled, tableName } from '../shared/ddb'
 import { hashIp } from '../shared/hash'
 import { callerFrom } from '../shared/identity'
 import { enforceRateLimit, RATE_LIMITS } from '../shared/rate-limit'

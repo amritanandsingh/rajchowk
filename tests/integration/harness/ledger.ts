@@ -45,7 +45,9 @@ export function trackedCount(): number {
  * (its article), so a partially-deleted graph never looks like live data to a
  * subsequent run.
  */
-export async function sweep(list: LedgerEntry[] = entries): Promise<{ deleted: number; failed: number }> {
+export async function sweep(
+  list: LedgerEntry[] = entries,
+): Promise<{ deleted: number; failed: number }> {
   let deleted = 0
   let failed = 0
 

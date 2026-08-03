@@ -2,13 +2,7 @@ import { Logger } from '@aws-lambda-powertools/logger'
 import { GetCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb'
 import type { Schema } from '../../data/resource'
 import { writeAudit } from '../shared/audit'
-import {
-  amplifyItem,
-  cancelledAt,
-  ddb,
-  isTransactionCancelled,
-  tableName,
-} from '../shared/ddb'
+import { amplifyItem, cancelledAt, ddb, isTransactionCancelled, tableName } from '../shared/ddb'
 import { hashIp } from '../shared/hash'
 import { callerFrom } from '../shared/identity'
 import { enforceRateLimit, RATE_LIMITS } from '../shared/rate-limit'
@@ -101,19 +95,19 @@ export const handler: Schema['castVote']['functionHandler'] = async (event) => {
   try {
     await ddb.send(
       new TransactWriteCommand({
-            // NO ClientRequestToken here, deliberately.
-            //
-            // A deterministic token plus a non-deterministic item is a bug:
-            // the items embed `now`, so a genuine client retry inside
-            // DynamoDB's 10-minute window reuses the token with DIFFERENT
-            // parameters and the call fails with
-            // IdempotentParameterMismatch — an unhandled 500 exactly when the
-            // reader is retrying on a flaky connection.
-            //
-            // It bought nothing either: the conditional write below already
-            // gives exact-once semantics. A duplicate attempt fails
-            // attribute_not_exists(id), which the catch block turns into the
-            // idempotent-replay path. Found by tests/integration/vote.test.ts.
+        // NO ClientRequestToken here, deliberately.
+        //
+        // A deterministic token plus a non-deterministic item is a bug:
+        // the items embed `now`, so a genuine client retry inside
+        // DynamoDB's 10-minute window reuses the token with DIFFERENT
+        // parameters and the call fails with
+        // IdempotentParameterMismatch — an unhandled 500 exactly when the
+        // reader is retrying on a flaky connection.
+        //
+        // It bought nothing either: the conditional write below already
+        // gives exact-once semantics. A duplicate attempt fails
+        // attribute_not_exists(id), which the catch block turns into the
+        // idempotent-replay path. Found by tests/integration/vote.test.ts.
         TransactItems: [
           {
             Put: {

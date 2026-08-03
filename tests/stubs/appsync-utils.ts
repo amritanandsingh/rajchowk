@@ -69,4 +69,6 @@ export const runtime = {
   },
 }
 
-export default { util, runtime }
+const appsyncUtils = { util, runtime }
+
+export default appsyncUtils

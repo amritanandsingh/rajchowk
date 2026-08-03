@@ -55,7 +55,10 @@ describe('RATE_LIMITS budgets', () => {
     }
 
     for (const [subject, windows] of bySubject) {
-      expect([...windows].sort((a, b) => a - b), subject).toEqual(windows)
+      expect(
+        [...windows].sort((a, b) => a - b),
+        subject,
+      ).toEqual(windows)
     }
   })
 
@@ -100,7 +103,9 @@ describe('subjectFor', () => {
   })
 
   it('is stable for the same ip, so the counter accumulates', () => {
-    expect(subjectFor({ sourceIp: ['203.0.113.7'] })).toBe(subjectFor({ sourceIp: ['203.0.113.7'] }))
+    expect(subjectFor({ sourceIp: ['203.0.113.7'] })).toBe(
+      subjectFor({ sourceIp: ['203.0.113.7'] }),
+    )
   })
 
   it('distinguishes different ips', () => {

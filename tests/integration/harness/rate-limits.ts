@@ -90,7 +90,12 @@ export async function resetRateLimits(...subjects: string[]): Promise<void> {
         for (const windowStart of [current, current - window]) {
           deletes.push(
             ddb
-              .send(new DeleteCommand({ TableName: table, Key: { id: `${scope}#${subject}#${windowStart}` } }))
+              .send(
+                new DeleteCommand({
+                  TableName: table,
+                  Key: { id: `${scope}#${subject}#${windowStart}` },
+                }),
+              )
               // A missing row is the normal case; DeleteItem is idempotent.
               .catch(() => undefined),
           )

@@ -1,59 +1,66 @@
-import { listCategories, listPublishedArticles } from '@/lib/amplify/queries'
+import { listCategories, listPromises, listPublishedArticles } from '@/lib/amplify/queries'
 import { absoluteUrl } from '@/lib/env'
 
-/**
- * The sitemap index.
- *
- * Hand-rolled rather than using the `app/sitemap.ts` convention, for a
- * concrete reason: that convention occupies /sitemap.xml itself, and its
- * `generateSitemaps` helper shards to /sitemap/[id].xml WITHOUT ever emitting
- * an index. Using it would make it impossible to own this URL — which is the
- * one Search Console and robots.txt point at.
- */
 export const dynamic = 'force-static'
 export const revalidate = 3600
-
-const URLS_PER_SHARD = 5000
 
 function xmlEscape(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 export async function GET(): Promise<Response> {
-  // One page is enough to know whether there is anything to index; the shard
-  // routes do their own counting.
-  const [{ items: articles }, categories] = await Promise.all([
+  const [articles, opinions, promises, categories] = await Promise.all([
     listPublishedArticles({ limit: 24 }),
+    listPublishedArticles({ contentType: 'OPINION', limit: 24 }),
+    listPromises({ limit: 24 }),
     listCategories(),
   ])
-
-  const now = new Date().toISOString()
-  const latest = articles[0]?.publishedAt ?? now
-
-  const shards: Array<{ loc: string; lastmod: string }> = [
-    { loc: absoluteUrl('/sitemaps/static/0'), lastmod: now },
-    { loc: absoluteUrl('/sitemaps/news/0'), lastmod: latest },
-    { loc: absoluteUrl('/sitemaps/opinion/0'), lastmod: latest },
-    { loc: absoluteUrl('/sitemaps/promise/0'), lastmod: now },
-    { loc: absoluteUrl('/news-sitemap.xml'), lastmod: latest },
+  const staticPaths = [
+    '/',
+    '/latest',
+    '/opinion',
+    '/janmat',
+    '/ask',
+    '/promises',
+    '/live',
+    '/videos',
+    '/about',
+    '/editorial-policy',
+    '/corrections-policy',
+    '/contact',
   ]
-
-  for (const category of categories) {
-    if (!category?.slug) continue
-    shards.push({ loc: absoluteUrl(`/sitemaps/category/0`), lastmod: latest })
-    break // one shard covers every category listing page
-  }
-
+  const urls = [
+    ...staticPaths.map((path) => ({ path, lastmod: undefined as string | undefined })),
+    ...articles.items
+      .filter((article) => article.contentType !== 'OPINION')
+      .map((article) => ({
+        path: `/news/${article.slug}`,
+        lastmod: article.publishedAt ?? undefined,
+      })),
+    ...opinions.items.map((article) => ({
+      path: `/opinion/${article.slug}`,
+      lastmod: article.publishedAt ?? undefined,
+    })),
+    ...promises.items.map((promise) => ({
+      path: `/promises/${promise.slug}`,
+      lastmod: promise.lastVerifiedAt ?? undefined,
+    })),
+    ...categories
+      .filter((category) => Boolean(category.slug))
+      .map((category) => ({
+        path: `/category/${category.slug}`,
+        lastmod: undefined as string | undefined,
+      })),
+  ]
   const xml = [
     '<?xml version="1.0" encoding="UTF-8"?>',
-    '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
-    ...shards.map(
-      (shard) =>
-        `  <sitemap><loc>${xmlEscape(shard.loc)}</loc><lastmod>${shard.lastmod}</lastmod></sitemap>`,
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ...urls.map(
+      ({ path, lastmod }) =>
+        `  <url><loc>${xmlEscape(absoluteUrl(path))}</loc>${lastmod ? `<lastmod>${lastmod}</lastmod>` : ''}</url>`,
     ),
-    '</sitemapindex>',
+    '</urlset>',
   ].join('\n')
-
   return new Response(xml, {
     headers: {
       'Content-Type': 'application/xml; charset=utf-8',
@@ -61,5 +68,3 @@ export async function GET(): Promise<Response> {
     },
   })
 }
-
-export { URLS_PER_SHARD }

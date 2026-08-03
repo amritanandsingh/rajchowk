@@ -1341,6 +1341,52 @@ const schema = a
       options: a.ref('PublicPollOption').array(),
     }),
 
+    PublicPollCard: a.customType({
+      id: a.id().required(),
+      question: a.string().required(),
+      description: a.string(),
+      language: a.string(),
+      status: a.string(),
+      articleId: a.id(),
+      totalVotes: a.integer(),
+      opensAt: a.datetime(),
+      closesAt: a.datetime(),
+      isDaily: a.boolean(),
+    }),
+
+    PublicPollConnection: a.customType({
+      items: a.ref('PublicPollCard').required().array().required(),
+      nextToken: a.string(),
+    }),
+
+    PublicPromise: a.customType({
+      id: a.id().required(),
+      slug: a.string().required(),
+      title: a.string().required(),
+      politician: a.string().required(),
+      organisation: a.string(),
+      party: a.string().required(),
+      state: a.string(),
+      constituency: a.string(),
+      topic: a.string(),
+      language: a.string(),
+      promiseText: a.string().required(),
+      dateMade: a.date(),
+      targetDate: a.date(),
+      sourceUrl: a.string(),
+      assessment: a.string(),
+      assessmentMethod: a.string(),
+      evidenceKeys: a.string().array(),
+      evidenceUrls: a.string().array(),
+      lastVerifiedAt: a.datetime(),
+      status: a.string().required(),
+    }),
+
+    PublicPromiseConnection: a.customType({
+      items: a.ref('PublicPromise').required().array().required(),
+      nextToken: a.string(),
+    }),
+
     PublicComment: a.customType({
       id: a.id().required(),
       articleId: a.id().required(),
@@ -1540,9 +1586,11 @@ const schema = a
         nextToken: a.string(),
       })
       .returns(a.ref('PublicArticleConnection'))
-      // Lambda-backed, so identity-pool guest auth IS available here and no
-      // API key is involved.
+      // Lambda-backed, so identity-pool guest auth is available. API-key auth
+      // is also allowed because public ISR pages use the stateless public
+      // server client for every content projection.
       .authorization((allow) => [
+        allow.publicApiKey(),
         allow.guest(),
         allow.authenticated('identityPool'),
         allow.authenticated(),
@@ -1584,6 +1632,42 @@ const schema = a
           dataSource: a.ref('PollOption'),
         }),
       ]),
+
+    listPublicPolls: a
+      .query()
+      .arguments({ status: a.string(), limit: a.integer(), nextToken: a.string() })
+      .returns(a.ref('PublicPollConnection'))
+      .authorization((allow) => [allow.publicApiKey(), allow.authenticated()])
+      .handler(
+        a.handler.custom({
+          entry: './resolvers/list-public-polls.js',
+          dataSource: a.ref('Poll'),
+        }),
+      ),
+
+    listPublicPromises: a
+      .query()
+      .arguments({ language: a.string(), limit: a.integer(), nextToken: a.string() })
+      .returns(a.ref('PublicPromiseConnection'))
+      .authorization((allow) => [allow.publicApiKey(), allow.authenticated()])
+      .handler(
+        a.handler.custom({
+          entry: './resolvers/list-public-promises.js',
+          dataSource: a.ref('PromiseTrackerEntry'),
+        }),
+      ),
+
+    getPublicPromise: a
+      .query()
+      .arguments({ slug: a.string().required() })
+      .returns(a.ref('PublicPromise'))
+      .authorization((allow) => [allow.publicApiKey(), allow.authenticated()])
+      .handler(
+        a.handler.custom({
+          entry: './resolvers/get-public-promise.js',
+          dataSource: a.ref('PromiseTrackerEntry'),
+        }),
+      ),
 
     listApprovedComments: a
       .query()
@@ -1822,13 +1906,13 @@ export const data = defineData({
 
     // The API key exists for ONE reason, and it is a platform constraint
     // rather than a design choice: Amplify rejects identityPool auth on
-    // `a.handler.custom`, so the nine APPSYNC_JS public read queries cannot
+    // `a.handler.custom`, so the read-only APPSYNC_JS public queries cannot
     // use allow.guest(). It is verified, not assumed — `ampx sandbox` fails
     // with "identityPool-based auth ... is not supported with
     // a.handler.custom".
     //
     // What the key can actually reach is deliberately tiny:
-    //   - the nine read-only APPSYNC_JS content queries, which return
+    //   - the read-only APPSYNC_JS content queries, which return
     //     field-allowlisted custom types with the published status hard-coded
     //     server-side into a partition key the caller cannot influence; and
     //   - READ on exactly three reference models — Category, Tag and

@@ -18,7 +18,11 @@ const script = (container: HTMLElement) =>
 describe('JsonLd', () => {
   it('emits a single ld+json script for one object', () => {
     const { container } = render(
-      <JsonLd data={{ '@context': 'https://schema.org', '@type': 'Thing', name: 'x' } as WithContext<Thing>} />,
+      <JsonLd
+        data={
+          { '@context': 'https://schema.org', '@type': 'Thing', name: 'x' } as WithContext<Thing>
+        }
+      />,
     )
     const scripts = container.querySelectorAll('script[type="application/ld+json"]')
     expect(scripts).toHaveLength(1)
@@ -28,10 +32,12 @@ describe('JsonLd', () => {
   it('emits one script per entry for an array', () => {
     const { container } = render(
       <JsonLd
-        data={[
-          { '@context': 'https://schema.org', '@type': 'Thing', name: 'a' },
-          { '@context': 'https://schema.org', '@type': 'Thing', name: 'b' },
-        ] as WithContext<Thing>[]}
+        data={
+          [
+            { '@context': 'https://schema.org', '@type': 'Thing', name: 'a' },
+            { '@context': 'https://schema.org', '@type': 'Thing', name: 'b' },
+          ] as WithContext<Thing>[]
+        }
       />,
     )
     expect(container.querySelectorAll('script[type="application/ld+json"]')).toHaveLength(2)
@@ -79,7 +85,9 @@ describe('JsonLd', () => {
     // parses — and round-trips back to the original text.
     const name = '</script> तथा <b>बोल्ड</b>'
     const { container } = render(
-      <JsonLd data={{ '@context': 'https://schema.org', '@type': 'Thing', name } as WithContext<Thing>} />,
+      <JsonLd
+        data={{ '@context': 'https://schema.org', '@type': 'Thing', name } as WithContext<Thing>}
+      />,
     )
     const parsed = JSON.parse(script(container)?.textContent ?? '{}')
     expect(parsed.name).toBe(name)
@@ -89,7 +97,11 @@ describe('JsonLd', () => {
     const { container } = render(
       <JsonLd
         data={
-          { '@context': 'https://schema.org', '@type': 'Thing', name: 'दिल्ली में फैसला' } as WithContext<Thing>
+          {
+            '@context': 'https://schema.org',
+            '@type': 'Thing',
+            name: 'दिल्ली में फैसला',
+          } as WithContext<Thing>
         }
       />,
     )
@@ -105,7 +117,9 @@ describe('JsonLd', () => {
     // next/script defers and relocates the tag; a plain <script> in the markup
     // is what Google actually reads.
     const { container } = render(
-      <JsonLd data={{ '@context': 'https://schema.org', '@type': 'Thing' } as WithContext<Thing>} />,
+      <JsonLd
+        data={{ '@context': 'https://schema.org', '@type': 'Thing' } as WithContext<Thing>}
+      />,
     )
     const element = script(container)
     expect(element?.tagName).toBe('SCRIPT')

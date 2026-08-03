@@ -193,6 +193,8 @@ export const hi = {
     breakingNews: 'ब्रेकिंग न्यूज़',
     mainNavigation: 'मुख्य नेविगेशन',
     footerNavigation: 'फुटर नेविगेशन',
+    footerSections: 'फुटर के मुख्य अनुभाग',
+    footerInformation: 'फुटर की जानकारी',
     userMenu: 'उपयोगकर्ता मेन्यू',
     playVideo: 'चलाएँ: {title}',
   },

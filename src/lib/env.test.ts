@@ -74,9 +74,7 @@ describe('rejected configuration', () => {
   })
 
   it('rejects a value that is not an absolute URL', async () => {
-    await expect(loadEnv({ NEXT_PUBLIC_SITE_URL: 'rajchowk.in' })).rejects.toThrow(
-      /absolute URL/,
-    )
+    await expect(loadEnv({ NEXT_PUBLIC_SITE_URL: 'rajchowk.in' })).rejects.toThrow(/absolute URL/)
     await expect(loadEnv({ NEXT_PUBLIC_SITE_URL: 'not a url' })).rejects.toThrow()
   })
 
