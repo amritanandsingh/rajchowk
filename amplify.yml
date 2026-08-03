@@ -1,19 +1,24 @@
 # AWS Amplify Hosting build spec — Gen 2 fullstack branch deployment.
 #
-# Two things here are load-bearing and must not be "simplified":
+# Three things here are load-bearing and must not be "simplified":
 #
 #  1. The `backend` phase is what generates amplify_outputs.json. Remove it and
 #     the frontend build fails with "Can't resolve amplify_outputs.json".
 #  2. Every phase runs in a FRESH shell, so `nvm use` must be repeated in each.
 #     Amplify derives the SSR Lambda runtime from the build container's Node
 #     major version, and Hosting supports only Node 20/22/24.
+#  3. Node comes from .nvmrc, never from a bare major like `nvm install 22`.
+#     package.json pins `engines.node` to an exact patch and .npmrc sets
+#     engine-strict, so a floating major resolves to whatever 22.x the container
+#     ships and every `npm ci` below dies with EBADENGINE before it installs
+#     anything. Bump .nvmrc and engines.node together.
 version: 1
 backend:
   phases:
     build:
       commands:
-        - nvm install 22
-        - nvm use 22
+        - nvm install "$(cat .nvmrc)"
+        - nvm use "$(cat .nvmrc)"
         - node -v && npm -v
         # --include=dev because the container may set NODE_ENV=production, which
         # would skip devDependencies and break `next build` (no typescript).
@@ -27,14 +32,14 @@ frontend:
   phases:
     preBuild:
       commands:
-        - nvm install 22
-        - nvm use 22
+        - nvm install "$(cat .nvmrc)"
+        - nvm use "$(cat .nvmrc)"
         - node -v
         - npm ci --include=dev --include=optional
         - test -f amplify_outputs.json || (echo "FATAL amplify_outputs.json missing - did the backend phase run?" && exit 1)
     build:
       commands:
-        - nvm use 22
+        - nvm use "$(cat .nvmrc)"
         - npm run format:check
         - npm run lint
         - npm run typecheck:all

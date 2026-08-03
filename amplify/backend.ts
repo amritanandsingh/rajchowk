@@ -414,10 +414,22 @@ backend.newsletterSubscribe.resources.lambda.addToRolePolicy(
 /* ===========================================================================
  * 8. Reserved concurrency — a bounded blast radius
  *
- * Production only: reserving concurrency fails if the account's unreserved
- * pool is below 100, which is common in a fresh sandbox account.
+ * Production only, AND opt-in. Lambda rejects any reservation that would drop
+ * the account's unreserved pool below 100, so the 226 reserved below needs an
+ * account concurrency limit of at least 326. A fresh account is capped far
+ * lower — this one was at 10 — and CloudFormation then fails the whole stack
+ * with "decreases account's UnreservedConcurrentExecution below its minimum
+ * value". That is a deploy-time hard failure, not a warning.
+ *
+ * So this stays off until the quota is actually raised. Once the Lambda
+ * "Concurrent executions" quota (L-B99A9384) is >= 326, set
+ * ENABLE_RESERVED_CONCURRENCY=1 in the branch environment variables and
+ * redeploy. Check the current limit with:
+ *   aws lambda get-account-settings --query AccountLimit.ConcurrentExecutions
+ *
+ * While it is off, reconcileCounters loses its serial guarantee (see below).
  * ======================================================================== */
-if (isProduction) {
+if (isProduction && process.env.ENABLE_RESERVED_CONCURRENCY === '1') {
   const CONCURRENCY: Array<
     [
       { resources: { cfnResources: { cfnFunction: { reservedConcurrentExecutions?: number } } } },
