@@ -1,0 +1,50 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.npm-cache/
+
+# next.js
+/.next/
+/out/
+/build
+next-env.d.ts
+*.tsbuildinfo
+
+# ---- AWS Amplify Gen 2 (MUST stay ignored) ----
+# Contains User Pool ID, App Client ID, Identity Pool ID and the AppSync URL.
+# Committing it makes Cognito enumeration trivial and it silently drifts
+# between branches. `ampx sandbox` / `ampx pipeline-deploy` regenerate it.
+amplify_outputs.json
+amplify_outputs*.json
+amplifyconfiguration*.json
+.amplify/
+/amplify/.amplify/
+
+# ---- env / secrets (MUST stay ignored) ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.aws/
+aws-exports.js
+
+# testing
+/coverage
+/test-results
+/playwright-report
+/playwright/.cache
+/playwright/.auth
+/blob-report
+
+# misc
+.DS_Store
+npm-debug.log*
+yarn-debug.log*
+.pnpm-debug.log*
+.vercel
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json

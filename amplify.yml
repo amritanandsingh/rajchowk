@@ -1,0 +1,52 @@
+# AWS Amplify Hosting build spec — Gen 2 fullstack branch deployment.
+#
+# Two things here are load-bearing and must not be "simplified":
+#
+#  1. The `backend` phase is what generates amplify_outputs.json. Remove it and
+#     the frontend build fails with "Can't resolve amplify_outputs.json".
+#  2. Every phase runs in a FRESH shell, so `nvm use` must be repeated in each.
+#     Amplify derives the SSR Lambda runtime from the build container's Node
+#     major version, and Hosting supports only Node 20/22/24.
+version: 1
+backend:
+  phases:
+    build:
+      commands:
+        - nvm install 22
+        - nvm use 22
+        - node -v && npm -v
+        # --include=dev because the container may set NODE_ENV=production, which
+        # would skip devDependencies and break `next build` (no typescript).
+        # --include=optional because @tailwindcss/oxide and @next/swc are
+        # platform-specific optional deps.
+        - npm ci --include=dev --include=optional
+        # `ampx pipeline-deploy` refuses to run unless it detects CI.
+        - export CI=1
+        - npx ampx pipeline-deploy --branch $AWS_BRANCH --app-id $AWS_APP_ID
+frontend:
+  phases:
+    preBuild:
+      commands:
+        - nvm install 22
+        - nvm use 22
+        - node -v
+        - npm ci --include=dev --include=optional
+        - test -f amplify_outputs.json || (echo "FATAL amplify_outputs.json missing - did the backend phase run?" && exit 1)
+    build:
+      commands:
+        - nvm use 22
+        - npm run format:check
+        - npm run lint
+        - npm run typecheck:all
+        - npm run test
+        - npm run build
+  artifacts:
+    # Mandatory for Next.js SSR on Amplify Hosting. Do not change this, and do
+    # not set `distDir` in next.config.ts.
+    baseDirectory: .next
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - .next/cache/**/*
+      - node_modules/**/*
