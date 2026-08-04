@@ -34,10 +34,14 @@
     "sandbox:once": "ampx sandbox --once",
     "sandbox:delete": "ampx sandbox delete",
     "seed": "ampx sandbox seed",
-    "verify": "npm run format:check && npm run lint && npm run typecheck:all && npm run test && npm run build",
+    "verify:lock": "npm ci --dry-run",
+    "verify": "npm run verify:lock && npm run format:check && npm run lint && npm run typecheck:all && npm run test && npm run build",
     "verify:full": "npm run verify && npm run test:integration && npm run e2e:mocked",
     "verify:backend": "tsx scripts/verify-backend.ts",
     "role:grant": "tsx scripts/grant-role.ts"
+  },
+  "scriptsRationale": {
+    "verify:lock": "First step of `verify`, because a package-lock.json that has drifted out of sync with package.json fails `npm ci` in the Amplify backend phase — before any code is compiled — and every other check here would still pass locally against a stale node_modules. That is exactly how a corrupted lock reached main once. `--dry-run` writes nothing. It may reach the registry for metadata, so a fully offline run needs `npm run verify:lock -- --offline`."
   },
   "overridesRationale": {
     "sharp": "Next declares optional sharp ^0.34.3, but every 0.34.x inherits four libvips CVEs (GHSA-f88m-g3jw-g9cj). The image optimizer processes user-uploaded avatars, so this is a reachable path. 0.35.x is a semver-minor bump with a stable API. Amplify Hosting supplies its own sharp at runtime; this protects local dev and any self-hosted build.",
