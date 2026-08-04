@@ -13,9 +13,9 @@ export const hi = {
   nav: {
     home: 'होम',
     latest: 'ताज़ा',
-    opinion: 'मेरी राय',
+    opinion: 'राज चौक की राय',
     janmat: 'जनमत',
-    ask: 'अमृत से पूछें',
+    ask: 'राज चौक से पूछें',
     promises: 'वादा ट्रैकर',
     live: 'लाइव',
     videos: 'वीडियो',
@@ -38,8 +38,8 @@ export const hi = {
   article: {
     whatHappened: 'क्या हुआ',
     importantFacts: 'ज़रूरी तथ्य',
-    myAnalysis: 'मेरा विश्लेषण',
-    myConclusion: 'मेरा निष्कर्ष',
+    myAnalysis: 'विश्लेषण',
+    myConclusion: 'निष्कर्ष',
     sources: 'स्रोत',
     relatedArticles: 'संबंधित खबरें',
     readingTime: '{minutes} मिनट का पठन',
@@ -54,7 +54,7 @@ export const hi = {
 
   badge: {
     verifiedFact: 'सत्यापित तथ्य',
-    myAnalysis: 'मेरा विश्लेषण',
+    myAnalysis: 'विश्लेषण',
     opinion: 'राय',
     developing: 'विकसित हो रही खबर',
     correction: 'सुधार',
@@ -79,7 +79,7 @@ export const hi = {
   },
 
   questions: {
-    title: 'अमृत से पूछें',
+    title: 'राज चौक से पूछें',
     ask: 'सवाल पूछें',
     upvote: 'समर्थन',
     removeUpvote: 'समर्थन हटाएँ',

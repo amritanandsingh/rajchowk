@@ -12,9 +12,9 @@ export const en: Dictionary = {
   nav: {
     home: 'Home',
     latest: 'Latest',
-    opinion: 'My Opinion',
+    opinion: 'Raj Chowk Opinion',
     janmat: 'Janmat',
-    ask: 'Ask Amrit',
+    ask: 'Ask Raj Chowk',
     promises: 'Promise Tracker',
     live: 'Live',
     videos: 'Videos',
@@ -37,8 +37,8 @@ export const en: Dictionary = {
   article: {
     whatHappened: 'What happened',
     importantFacts: 'Important facts',
-    myAnalysis: 'My analysis',
-    myConclusion: 'My conclusion',
+    myAnalysis: 'Analysis',
+    myConclusion: 'Conclusion',
     sources: 'Sources',
     relatedArticles: 'Related stories',
     readingTime: '{minutes} min read',
@@ -53,7 +53,7 @@ export const en: Dictionary = {
 
   badge: {
     verifiedFact: 'Verified Fact',
-    myAnalysis: 'My Analysis',
+    myAnalysis: 'Analysis',
     opinion: 'Opinion',
     developing: 'Developing Story',
     correction: 'Correction',
@@ -78,7 +78,7 @@ export const en: Dictionary = {
   },
 
   questions: {
-    title: 'Ask Amrit',
+    title: 'Ask Raj Chowk',
     ask: 'Ask a question',
     upvote: 'Upvote',
     removeUpvote: 'Remove upvote',

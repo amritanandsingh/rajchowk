@@ -95,7 +95,7 @@ describe('ArticleBody — labelling', () => {
     expect(screen.getAllByText(dict.badge.verifiedFact).length).toBeGreaterThanOrEqual(1)
 
     // NOTE: dict.article.myAnalysis and dict.badge.myAnalysis are the SAME
-    // string ("मेरा विश्लेषण"), so a bare getByText matches both the section
+    // string ("विश्लेषण"), so a bare getByText matches both the section
     // heading and the badge inside it. Scope each assertion to its landmark.
     const analysis = screen.getByRole('region', { name: dict.article.myAnalysis })
     expect(within(analysis).getAllByText(dict.badge.myAnalysis).length).toBeGreaterThanOrEqual(1)

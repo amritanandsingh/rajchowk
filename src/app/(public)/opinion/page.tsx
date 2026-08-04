@@ -6,7 +6,7 @@ import { listPublishedArticles } from '@/lib/amplify/queries'
 import { getDictionary } from '@/lib/i18n'
 
 export const revalidate = 60
-export const metadata: Metadata = { title: 'मेरी राय', alternates: { canonical: '/opinion' } }
+export const metadata: Metadata = { title: 'राज चौक की राय', alternates: { canonical: '/opinion' } }
 
 export default async function OpinionPage() {
   const dict = getDictionary('hi')

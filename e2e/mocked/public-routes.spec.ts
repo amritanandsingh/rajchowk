@@ -13,9 +13,9 @@ test('mobile navigation reaches the primary public sections', async ({ page }) =
 
 test('all public landing pages render a meaningful heading', async ({ page }) => {
   const routes = [
-    ['/opinion', 'मेरी राय'],
+    ['/opinion', 'राज चौक की राय'],
     ['/janmat', 'जनमत'],
-    ['/ask', 'अमृत से पूछें'],
+    ['/ask', 'राज चौक से पूछें'],
     ['/promises', 'वादा ट्रैकर'],
     ['/live', 'लाइव चर्चा'],
     ['/videos', 'वीडियो'],

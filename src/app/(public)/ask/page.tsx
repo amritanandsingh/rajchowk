@@ -8,7 +8,7 @@ import { formatDate } from '@/lib/format'
 import { getDictionary } from '@/lib/i18n'
 
 export const revalidate = 60
-export const metadata: Metadata = { title: 'अमृत से पूछें', alternates: { canonical: '/ask' } }
+export const metadata: Metadata = { title: 'राज चौक से पूछें', alternates: { canonical: '/ask' } }
 
 export default async function AskPage() {
   const dict = getDictionary('hi')
