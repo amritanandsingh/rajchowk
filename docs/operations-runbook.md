@@ -10,9 +10,9 @@
 
 ## Incident response
 
-For a frontend regression, redeploy the last known-good commit in Amplify. For a backend regression, first stop the affected UI entry point or revoke the relevant staff group, then deploy a forward fix; do not delete protected production tables. Use DynamoDB point-in-time recovery for data corruption and preserve AuditLog records for investigation.
+For a frontend regression, redeploy the last known-good commit in Amplify. For a backend regression, first stop the affected UI entry point or revoke the relevant staff group (`npm run role:grant -- --email USER_EMAIL --role EDITOR --revoke`), then deploy a forward fix; do not delete protected production tables. Use DynamoDB point-in-time recovery for data corruption and preserve AuditLog records for investigation.
 
-If a signing secret may be exposed, rotate it in Amplify secrets and redeploy. Rotating `NEWSLETTER_TOKEN_SECRET` invalidates outstanding verification/unsubscribe links; rotating `RATE_LIMIT_IP_SALT` starts new anonymous rate-limit buckets. If an administrator account is compromised, disable the Cognito user, revoke sessions, remove group membership, rotate operator credentials and review audit events.
+If a signing secret may be exposed, rotate it in Amplify secrets and redeploy. Rotating `NEWSLETTER_TOKEN_SECRET` invalidates outstanding verification/unsubscribe links; rotating `RATE_LIMIT_IP_SALT` starts new anonymous rate-limit buckets. If an administrator account is compromised, disable the Cognito user, revoke sessions, remove group membership (`npm run role:grant -- --email USER_EMAIL --role ADMIN --revoke`, which refuses if it would empty the `ADMIN` group), rotate operator credentials and review audit events. A revocation only takes effect once the account's current ID token expires, so revoke the sessions too.
 
 ## Post-deploy smoke test
 
