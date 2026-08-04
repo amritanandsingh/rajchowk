@@ -13,7 +13,20 @@ The build must pass the committed backend deploy, formatting, linting, applicati
 
 ## First administrator
 
-Create and confirm the account through the public sign-up flow, then add it to the generated Cognito `ADMIN` group with an operator credential:
+Roles are Cognito groups, not a stored field, and no in-app path can grant `ADMIN` — see the comment in `amplify/auth/resource.ts`. Create and confirm the account through the public sign-up flow, then grant the group with an operator credential:
+
+```bash
+npm run role:grant -- --email USER_EMAIL --role ADMIN
+```
+
+The script targets the pool in `amplify_outputs.json`. For a pool that file does not describe — production, from a machine holding only credentials — name it and confirm:
+
+```bash
+npm run role:grant -- --email USER_EMAIL --role ADMIN \
+  --user-pool-id USER_POOL_ID --region ap-south-1 --yes
+```
+
+It prints the pool, the account status and the resulting groups, is safe to re-run, and refuses to remove the last `ADMIN`. Pass `--list` to read memberships without writing. Without a repository checkout the underlying call is:
 
 ```bash
 aws cognito-idp admin-add-user-to-group \
