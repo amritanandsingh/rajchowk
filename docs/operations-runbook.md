@@ -8,6 +8,14 @@
 - Run the counter reconciliation function after a suspected partial failure or manual data repair.
 - Verify `/robots.txt`, `/sitemap.xml`, `/news-sitemap.xml` and `/feed.xml` after domain or URL changes.
 
+## Categories
+
+An article cannot be saved without a category — `Article.categoryId` is required, and the publish function derives the category feed key from it. A newly deployed environment has none, so the first editor creates one from the article form itself (`+ नई श्रेणी`), which needs `EDITOR` or `ADMIN`.
+
+A category slug is a permanent public URL (`/category/<slug>`), so it is typed in ASCII rather than transliterated from the Hindi name. There is no UI for renaming, reordering or deactivating a category yet: use the AppSync console, and remember that changing a slug breaks inbound links to the old one. Slug uniqueness is checked before creation but is not enforced by the table, so two editors adding the same topic within a few seconds can both succeed — check for a duplicate before assuming a category is missing.
+
+Categories only enter `/sitemap.xml` once they have at least one published article, so a category created for a draft is deliberately absent until that article goes live.
+
 ## Incident response
 
 For a frontend regression, redeploy the last known-good commit in Amplify. For a backend regression, first stop the affected UI entry point or revoke the relevant staff group (`npm run role:grant -- --email USER_EMAIL --role EDITOR --revoke`), then deploy a forward fix; do not delete protected production tables. Use DynamoDB point-in-time recovery for data corruption and preserve AuditLog records for investigation.

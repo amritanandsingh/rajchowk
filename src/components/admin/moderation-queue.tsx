@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { browserDataClient, readableAmplifyError } from '@/lib/amplify/browser-client'
+import { adminDataClient, readableAmplifyError } from '@/lib/amplify/browser-client'
 
 type Item = { id: string; type: 'COMMENT' | 'QUESTION'; text: string; author: string }
 export function ModerationQueue() {
@@ -13,8 +13,8 @@ export function ModerationQueue() {
     setLoading(true)
     try {
       const [comments, questions] = await Promise.all([
-        browserDataClient.models.Comment.listCommentsByStatus({ status: 'PENDING' }, { limit: 50 }),
-        browserDataClient.models.AudienceQuestion.listQuestionsByStatus(
+        adminDataClient.models.Comment.listCommentsByStatus({ status: 'PENDING' }, { limit: 50 }),
+        adminDataClient.models.AudienceQuestion.listQuestionsByStatus(
           { status: 'PENDING_REVIEW' },
           { limit: 50 },
         ),
@@ -48,7 +48,7 @@ export function ModerationQueue() {
     try {
       const action =
         item.type === 'COMMENT' ? (approve ? 'APPROVE' : 'REJECT') : approve ? 'APPROVE' : 'REJECT'
-      const response = await browserDataClient.mutations.moderateContent({
+      const response = await adminDataClient.mutations.moderateContent({
         targetType: item.type,
         targetId: item.id,
         action,

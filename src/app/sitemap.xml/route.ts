@@ -46,7 +46,12 @@ export async function GET(): Promise<Response> {
       lastmod: promise.lastVerifiedAt ?? undefined,
     })),
     ...categories
-      .filter((category) => Boolean(category.slug))
+      // Editors can now create a category from the article form, so an empty
+      // one can exist for as long as its first article stays in draft. Listing
+      // it would submit a page that renders nothing but "no news yet" — thin
+      // content, and a crawl budget spent on it. publishedArticleCount is
+      // maintained by the publish Lambda, so this self-corrects on publish.
+      .filter((category) => Boolean(category.slug) && (category.publishedArticleCount ?? 0) > 0)
       .map((category) => ({
         path: `/category/${category.slug}`,
         lastmod: undefined as string | undefined,
