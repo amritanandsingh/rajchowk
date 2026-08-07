@@ -1,4 +1,4 @@
-import { CommentForm } from '@/components/forms/comment-form'
+import { LazyCommentForm } from '@/components/forms/lazy'
 import type { PublicComment } from '@/lib/amplify/queries'
 import { formatDate } from '@/lib/format'
 import type { Dictionary } from '@/lib/i18n'
@@ -37,7 +37,7 @@ export function CommentsSection({
         <p className="mt-4 text-sm text-fg-muted">{dict.comments.empty}</p>
       )}
       {allowComments ? (
-        <CommentForm articleId={articleId} />
+        <LazyCommentForm articleId={articleId} />
       ) : (
         <p className="mt-4 rounded-card bg-bg-subtle p-4 text-sm">{dict.comments.closed}</p>
       )}

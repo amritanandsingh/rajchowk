@@ -1,11 +1,12 @@
 import type { Metadata } from 'next'
 import { ArticleCard } from '@/components/editorial/article-card'
 import { ArticleGrid } from '@/components/editorial/article-grid'
-import { NewsletterForm } from '@/components/forms/newsletter-form'
+import { LazyNewsletterForm } from '@/components/forms/lazy'
 import { EmptyState } from '@/components/site/empty-state'
 import { SectionHeading } from '@/components/site/section-heading'
 import { listPublishedArticles } from '@/lib/amplify/queries'
 import { DEFAULT_LOCALE, getDictionary } from '@/lib/i18n'
+import { Container } from '@/components/ui/container'
 
 // Editorial pages are ISR: Amplify Hosting does not support on-demand ISR, so
 // freshness is a TTL rather than an invalidation. See docs/architecture.md.
@@ -26,7 +27,7 @@ export default async function HomePage() {
 
   return (
     <>
-      <main id="content" tabIndex={-1} className="mx-auto max-w-7xl px-4 py-8 sm:py-10">
+      <Container>
         <section aria-labelledby="top-story">
           <h1 id="top-story" className="sr-only">
             {dict.siteName} — {dict.tagline}
@@ -41,12 +42,13 @@ export default async function HomePage() {
           )}
         </section>
 
+        {/* The id goes on the <h2> inside SectionHeading, not on a wrapper
+            around the grid. Pointing aria-labelledby at the wrapper made each
+            section's accessible name the full text of every card in it. */}
         {remaining.length > 0 && (
           <section className="mt-12" aria-labelledby="latest-heading">
-            <SectionHeading title={dict.nav.latest} href="/latest" />
-            <div id="latest-heading">
-              <ArticleGrid articles={remaining} />
-            </div>
+            <SectionHeading id="latest-heading" title={dict.nav.latest} href="/latest" />
+            <ArticleGrid articles={remaining} />
           </section>
         )}
         {opinion.length > 0 && (
@@ -54,16 +56,14 @@ export default async function HomePage() {
             className="mt-12 rounded-card bg-brand-subtle p-5 sm:p-7"
             aria-labelledby="opinion-heading"
           >
-            <SectionHeading title={dict.nav.opinion} href="/opinion" />
-            <div id="opinion-heading">
-              <ArticleGrid articles={opinion} />
-            </div>
+            <SectionHeading id="opinion-heading" title={dict.nav.opinion} href="/opinion" />
+            <ArticleGrid articles={opinion} />
           </section>
         )}
         <section className="mt-12" aria-label={dict.newsletter.title}>
-          <NewsletterForm source="HOMEPAGE" />
+          <LazyNewsletterForm source="HOMEPAGE" />
         </section>
-      </main>
+      </Container>
     </>
   )
 }

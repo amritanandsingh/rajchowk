@@ -1,12 +1,13 @@
 import type { Metadata } from 'next'
 import { PageHeader } from '@/components/site/page-header'
+import { Container } from '@/components/ui/container'
 export const metadata: Metadata = {
   title: 'संपादकीय नीति',
   alternates: { canonical: '/editorial-policy' },
 }
 export default function EditorialPolicyPage() {
   return (
-    <main id="content" className="mx-auto max-w-3xl px-4 py-10">
+    <Container width="prose">
       <PageHeader title="संपादकीय नीति" />
       <div className="space-y-7 leading-7">
         <section>
@@ -29,6 +30,6 @@ export default function EditorialPolicyPage() {
           </p>
         </section>
       </div>
-    </main>
+    </Container>
   )
 }

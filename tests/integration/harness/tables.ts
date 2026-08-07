@@ -1,4 +1,9 @@
-import { DynamoDBClient, ListTablesCommand } from '@aws-sdk/client-dynamodb'
+import {
+  DescribeTableCommand,
+  DynamoDBClient,
+  ListTablesCommand,
+  ListTagsOfResourceCommand,
+} from '@aws-sdk/client-dynamodb'
 import {
   DeleteCommand,
   DynamoDBDocumentClient,
@@ -46,17 +51,70 @@ async function allTableNames(): Promise<string[]> {
   return names
 }
 
+let sandboxApiId: string | undefined
+
+/**
+ * The API id of the SANDBOX deployment, proven by resource tags.
+ *
+ * This is a safety guard, not a convenience. One AWS account routinely holds
+ * both the sandbox and a deployed branch, and every model then has two tables —
+ * `Article-<sandboxApiId>-NONE` and `Article-<branchApiId>-NONE`. Matching on
+ * the model prefix alone returns whichever `ListTables` happens to sort first,
+ * so a suite that creates, publishes and DELETES rows would silently operate on
+ * the production table the moment a redeployed sandbox drew an api id sorting
+ * after the branch's. `assertNotProduction()` does not cover this path: it reads
+ * amplify_outputs.json, which describes the GraphQL endpoint, while this module
+ * enumerates the account.
+ *
+ * Amplify tags every table it creates with `amplify:deployment-type` —
+ * `sandbox` for `ampx sandbox`, `branch` (plus `amplify:branch-name`) for a
+ * Hosting deployment. That tag is the only unambiguous discriminator, and
+ * reading it needs nothing beyond the DynamoDB client already used here.
+ */
+async function sandboxApiIdFrom(names: string[]): Promise<string> {
+  if (sandboxApiId) return sandboxApiId
+
+  // Category exists in every deployment of this schema and has no hyphen in its
+  // model name, so `<model>-<apiId>-<envName>` splits cleanly.
+  const candidates = names.filter((name) => /^Category-[^-]+-[^-]+$/.test(name))
+  const seen: string[] = []
+
+  for (const name of candidates) {
+    const described = await raw.send(new DescribeTableCommand({ TableName: name }))
+    const arn = described.Table?.TableArn
+    if (!arn) continue
+    const tags = await raw.send(new ListTagsOfResourceCommand({ ResourceArn: arn }))
+    const deploymentType = tags.Tags?.find((tag) => tag.Key === 'amplify:deployment-type')?.Value
+    const branch = tags.Tags?.find((tag) => tag.Key === 'amplify:branch-name')?.Value
+    seen.push(`${name} (${deploymentType ?? 'untagged'}${branch ? `:${branch}` : ''})`)
+    if (deploymentType === 'sandbox') {
+      sandboxApiId = name.split('-').at(-2)
+      if (sandboxApiId) return sandboxApiId
+    }
+  }
+
+  throw new Error(
+    'Could not identify a SANDBOX DynamoDB deployment in this account.\n' +
+      `Tables considered: ${seen.length ? seen.join(', ') : '(none)'}\n` +
+      'Refusing to fall back to a branch deployment — these tests delete rows.\n' +
+      'Deploy a sandbox first:  npx ampx sandbox --once',
+  )
+}
+
 /** The physical table backing a model, e.g. `Article` -> `Article-abc123-NONE`. */
 export async function tableFor(model: string): Promise<string> {
   const hit = resolved.get(model)
   if (hit) return hit
 
   const names = await allTableNames()
-  // Anchor on the trailing hyphen so `Article` cannot match `ArticleTag`.
-  const match = names.find((name) => name.startsWith(`${model}-`))
+  const apiId = await sandboxApiIdFrom(names)
+  // Pinned to the sandbox api id, and anchored on the trailing hyphen so
+  // `Article` cannot match `ArticleTag`.
+  const match = names.find((name) => name.startsWith(`${model}-${apiId}-`))
   if (!match) {
     throw new Error(
-      `No DynamoDB table found for model "${model}". Is the sandbox deployed and current?`,
+      `No DynamoDB table found for model "${model}" in sandbox ${apiId}. ` +
+        'Is the sandbox deployed and current?',
     )
   }
 

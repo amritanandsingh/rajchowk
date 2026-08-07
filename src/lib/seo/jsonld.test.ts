@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { PublicArticle } from '@/lib/amplify/queries'
 import {
@@ -58,6 +60,17 @@ describe('buildOrganizationLd', () => {
     for (const key of ['url', 'logo', 'ethicsPolicy', 'correctionsPolicy']) {
       expect(ld[key], key).toMatch(/^https?:\/\//)
     }
+  })
+
+  it('points `logo` at a file that actually exists', () => {
+    // The assertion above passed for a year while /logo.png 404'd: checking that
+    // a string looks like a URL says nothing about whether it resolves. Google
+    // requires a fetchable logo for NewsMediaOrganization publisher results, so
+    // a missing file silently invalidates the structured data this whole module
+    // exists to produce. Resolve the path and stat it.
+    const ld = buildOrganizationLd() as unknown as Record<string, string>
+    const path = new URL(ld.logo!).pathname
+    expect(existsSync(join(process.cwd(), 'public', path)), `public${path} is missing`).toBe(true)
   })
 })
 

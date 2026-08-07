@@ -98,7 +98,17 @@ type GraphQLish<T> = {
   errors?: Array<{ message: string; errorType?: string }>
 }
 
-/** Unwrap a call that must succeed. Throws with the real error text if not. */
+/**
+ * Unwrap a call that must succeed. Throws with the real error text if not.
+ *
+ * The third check is not redundant with the first two. A Lambda-backed mutation
+ * REFUSES by returning `{ ok: false, code, message }` inside a perfectly
+ * successful GraphQL response — no `errors`, non-null `data`. So a fixture built
+ * on the first two checks alone reports success while nothing happened, which is
+ * exactly how a publish path that could never succeed sat undetected. Asserted
+ * only when the payload actually carries `ok`, so calls that return a model
+ * (`Category.create` and friends) are unaffected.
+ */
 export function expectOk<T>(result: GraphQLish<T>, label: string): T {
   if (result.errors?.length) {
     throw new Error(
@@ -108,7 +118,37 @@ export function expectOk<T>(result: GraphQLish<T>, label: string): T {
   if (result.data === null || result.data === undefined) {
     throw new Error(`${label} returned no data and no errors`)
   }
+  const payload = result.data as { ok?: unknown; code?: unknown; message?: unknown }
+  if (typeof payload.ok === 'boolean' && !payload.ok) {
+    throw new Error(`${label} was refused: ${String(payload.code)} — ${String(payload.message)}`)
+  }
   return result.data
+}
+
+/**
+ * Unwrap a Lambda-backed call that must have been REFUSED by the handler.
+ *
+ * The counterpart to `expectOk`, and necessary now that `expectOk` throws on
+ * `ok: false`: a test asserting that a refusal happens still needs the payload.
+ * This also asserts the refusal arrived the intended way — as a typed result,
+ * not as a GraphQL error or a crash.
+ */
+export function expectRefused<T>(
+  result: GraphQLish<T>,
+  label: string,
+): { ok: false; code: string; message: string } {
+  if (result.errors?.length) {
+    throw new Error(
+      `${label} should have been refused with a typed result, but errored: ${result.errors
+        .map((error) => `${error.errorType ?? '?'}: ${error.message}`)
+        .join('; ')}`,
+    )
+  }
+  const payload = result.data as { ok?: unknown; code?: unknown; message?: unknown } | null
+  if (payload?.ok !== false) {
+    throw new Error(`${label} was expected to be refused, but returned ok=${String(payload?.ok)}`)
+  }
+  return { ok: false, code: String(payload.code), message: String(payload.message) }
 }
 
 /** The errorType of a call that must have been refused. */

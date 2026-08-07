@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import { PromiseStatus } from '@/components/promises/promise-status'
 import { getPromise } from '@/lib/amplify/queries'
 import { formatDate } from '@/lib/format'
+import { Container } from '@/components/ui/container'
 
 export const revalidate = 300
 type Props = { params: Promise<{ slug: string }> }
@@ -12,7 +13,7 @@ export default async function PromisePage({ params }: Props) {
   const promise = await getPromise(slug)
   if (!promise) notFound()
   return (
-    <main id="content" tabIndex={-1} className="mx-auto max-w-3xl px-4 py-8 sm:py-10">
+    <Container width="prose">
       <article>
         <PromiseStatus status={promise.status} />
         <h1 className="mt-4 font-display text-3xl font-bold sm:text-4xl">{promise.title}</h1>
@@ -83,6 +84,6 @@ export default async function PromisePage({ params }: Props) {
           </section>
         )}
       </article>
-    </main>
+    </Container>
   )
 }

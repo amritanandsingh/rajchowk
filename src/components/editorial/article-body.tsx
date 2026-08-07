@@ -69,11 +69,11 @@ export function ArticleBody({ article, dict }: { article: PublicArticle; dict: D
         </LabeledBlock>
       )}
 
-      {article.bodyMarkdown && (
-        <div className="prose-article">
-          <MarkdownContent source={article.bodyMarkdown} profile="full" />
-        </div>
-      )}
+      {/* No wrapper class. `prose-article` used to be here and was defined
+          NOWHERE — not in globals.css, and @tailwindcss/typography is not a
+          dependency — so it styled nothing while looking like it styled
+          everything. MarkdownContent gives each element its own classes. */}
+      {article.bodyMarkdown && <MarkdownContent source={article.bodyMarkdown} profile="full" />}
 
       {article.youtubeVideoId && (
         <section aria-label={dict.article.watchAnalysis} className="my-8">

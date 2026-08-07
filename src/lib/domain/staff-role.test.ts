@@ -23,10 +23,15 @@ describe('staff capability predicates', () => {
     expect(canCreateCategory([GROUP.MODERATOR])).toBe(false)
   })
 
-  it('mirrors publishArticle: allow.groups(STAFF), so not MODERATOR', () => {
+  it('lets ONLY an ADMIN publish — the core editorial rule', () => {
+    // PUBLISH and UNPUBLISH are adminOnly in the transition table and the
+    // publish function enforces it. Following the `allow.groups(STAFF)`
+    // directive instead would offer an editor a button that always fails.
     expect(canPublish([GROUP.ADMIN])).toBe(true)
-    expect(canPublish([GROUP.EDITOR])).toBe(true)
+    expect(canPublish([GROUP.EDITOR])).toBe(false)
     expect(canPublish([GROUP.MODERATOR])).toBe(false)
+    expect(canPublish([GROUP.EDITOR, GROUP.MODERATOR])).toBe(false)
+    expect(canPublish([])).toBe(false)
   })
 
   it('reads a multi-group claim', () => {

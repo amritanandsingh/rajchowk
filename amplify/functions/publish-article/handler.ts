@@ -9,6 +9,7 @@ import {
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb'
 import {
+  appearsInFeeds,
   categoryFeedKeyFor,
   checkTransition,
   feedKeyFor,
@@ -65,6 +66,7 @@ export const handler: Schema['publishArticle']['functionHandler'] = async (event
   const TAG_TABLE = tableName('ARTICLE_TAG_TABLE_NAME')
   const SEARCH_DOC_TABLE = tableName('SEARCH_DOCUMENT_TABLE_NAME')
   const SEARCH_TOKEN_TABLE = tableName('SEARCH_TOKEN_TABLE_NAME')
+  const CATEGORY_TABLE = tableName('CATEGORY_TABLE_NAME')
 
   const article = (
     await ddb.send(new GetCommand({ TableName: ARTICLE_TABLE, Key: { id: articleId } }))
@@ -77,6 +79,10 @@ export const handler: Schema['publishArticle']['functionHandler'] = async (event
   // is the safe default — an article with no status is never in a feed,
   // because feedKey is only ever set here.
   const currentStatus = (article.status ? String(article.status) : 'DRAFT') as ArticleStatus
+
+  // Whether that DRAFT was read or inferred, because the two need different
+  // DynamoDB conditions below and getting it wrong made publishing impossible.
+  const statusWasAbsent = article.status === undefined || article.status === null
 
   // Only an administrator may publish, schedule, unpublish or archive. The
   // @auth directive admits editors because they legitimately submit for review
@@ -132,12 +138,40 @@ export const handler: Schema['publishArticle']['functionHandler'] = async (event
   const removeClauses: string[] = []
   const values: Record<string, unknown> = {
     ':next': nextStatus,
-    ':current': currentStatus,
     ':now': now,
     ':plain': plain.slice(0, 20000),
     ':wordCount': countWords(plain),
     ':readingMinutes': readingMinutes(plain),
   }
+
+  /*
+   * The guard on the current status — and the reason publishing was impossible.
+   *
+   * DynamoDB evaluates a comparison against an ABSENT attribute as FALSE. A
+   * freshly created article has no `status` attribute at all: the field is
+   * Lambda-owned, so the create mutation cannot write it, and nothing else
+   * writes it either. The previous condition was a bare `#status = :current`
+   * with `:current` defaulted to 'DRAFT' in JavaScript just above — so it could
+   * never match a FIRST publish. The write failed the condition, the
+   * ConditionalCheckFailedException below was reported as a lost race, and the
+   * editor was told to retry something that could never succeed. No article had
+   * ever been published, by anyone, since the first commit.
+   *
+   * The three branches are the three representations of "unchanged since we
+   * read it": the attribute is still missing, it is still an explicit NULL, or
+   * it still equals what we read. Amplify's generated create resolver writes
+   * only the keys present in its input map, so absent is what actually occurs —
+   * the NULL branch costs nothing and removes the need to be right about that.
+   *
+   * Atomicity is preserved. Two administrators acting at the same instant still
+   * cannot both win: the first write makes the attribute a real status, so the
+   * second finds neither an absent attribute, nor a NULL, nor its own stale
+   * value.
+   */
+  const statusCondition =
+    'attribute_not_exists(#status) OR attribute_type(#status, :nullType) OR #status = :current'
+  values[':nullType'] = 'NULL'
+  values[':current'] = currentStatus
 
   // Null means REMOVE the attribute, which takes the row out of the sparse
   // feed GSI entirely — the article is absent from the feed rather than
@@ -178,14 +212,17 @@ export const handler: Schema['publishArticle']['functionHandler'] = async (event
         TableName: ARTICLE_TABLE,
         Key: { id: articleId },
         UpdateExpression: updateExpression,
-        ConditionExpression: '#status = :current',
+        ConditionExpression: statusCondition,
         ExpressionAttributeNames: { '#status': 'status' },
         ExpressionAttributeValues: values,
       }),
     )
   } catch (error) {
     if (isConditionalCheckFailed(error)) {
-      logger.warn('lost a concurrent transition race')
+      // Logged with the observed state: this line carried no fields at all
+      // while the condition above was unsatisfiable, which is a large part of
+      // why a deterministic failure looked like an intermittent one.
+      logger.warn('lost a concurrent transition race', { from: currentStatus, statusWasAbsent })
       return fail(CODE.CONFLICT) as Result
     }
     throw error
@@ -228,6 +265,13 @@ export const handler: Schema['publishArticle']['functionHandler'] = async (event
       now,
     }),
     maintainRedirect({ table: REDIRECT_TABLE, article, articleId, slug, nextStatus, now }),
+    syncCategoryCount({
+      table: CATEGORY_TABLE,
+      categoryId,
+      currentStatus,
+      nextStatus,
+      now,
+    }),
   ]).then((results) => {
     for (const result of results) {
       if (result.status === 'rejected') {
@@ -346,6 +390,49 @@ async function syncTagFeedKeys(args: {
             : { ':now': args.now },
         }),
       )
+    }),
+  )
+}
+
+/**
+ * Maintain `Category.publishedArticleCount`.
+ *
+ * The count means "articles currently appearing in feeds", so it is derived
+ * from `appearsInFeeds` rather than from a status equality — that keeps it in
+ * agreement with `feedKey`/`categoryFeedKey`, which are set by the same rule.
+ * Only a change in feed presence moves it, so DRAFT -> IN_REVIEW does nothing
+ * and a re-publish cannot double-count (PUBLISHED -> PUBLISH is refused as an
+ * illegal transition before reaching here).
+ *
+ * This closes a field that was declared, exposed on the public API and written
+ * by nobody: the IAM grant and CATEGORY_TABLE_NAME have existed since the first
+ * commit, but no code ever used them, so the count sat permanently null and
+ * /sitemap.xml could not gate a category on having any published article.
+ */
+async function syncCategoryCount(args: {
+  table: string
+  categoryId: string
+  currentStatus: ArticleStatus
+  nextStatus: ArticleStatus
+  now: string
+}): Promise<void> {
+  const wasInFeeds = appearsInFeeds(args.currentStatus)
+  const nowInFeeds = appearsInFeeds(args.nextStatus)
+  if (wasInFeeds === nowInFeeds || !args.categoryId) return
+
+  await ddb.send(
+    new UpdateCommand({
+      TableName: args.table,
+      Key: { id: args.categoryId },
+      UpdateExpression: nowInFeeds
+        ? 'SET publishedArticleCount = if_not_exists(publishedArticleCount, :zero) + :one, updatedAt = :now'
+        : 'SET publishedArticleCount = if_not_exists(publishedArticleCount, :zero) - :one, updatedAt = :now',
+      // The decrement guard keeps the counter from going negative if it is ever
+      // reconciled or repaired out from under us.
+      ConditionExpression: nowInFeeds
+        ? 'attribute_exists(id)'
+        : 'attribute_exists(id) AND publishedArticleCount > :zero',
+      ExpressionAttributeValues: { ':zero': 0, ':one': 1, ':now': args.now },
     }),
   )
 }

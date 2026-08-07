@@ -3,16 +3,17 @@ import type { Metadata } from 'next'
 import { PromiseStatus } from '@/components/promises/promise-status'
 import { EmptyState } from '@/components/site/empty-state'
 import { PageHeader } from '@/components/site/page-header'
-import { listPromises } from '@/lib/amplify/queries'
+import { listPromisesSlow } from '@/lib/amplify/queries'
 import { formatDate } from '@/lib/format'
+import { Container } from '@/components/ui/container'
 
 export const revalidate = 300
 export const metadata: Metadata = { title: 'वादा ट्रैकर', alternates: { canonical: '/promises' } }
 
 export default async function PromisesPage() {
-  const { items } = await listPromises({ limit: 24 })
+  const { items } = await listPromisesSlow({ limit: 24 })
   return (
-    <main id="content" tabIndex={-1} className="mx-auto max-w-6xl px-4 py-8 sm:py-10">
+    <Container>
       <PageHeader
         title="वादा ट्रैकर"
         description="सार्वजनिक वादों की दस्तावेज़ी जाँच—स्रोत, सबूत और हमारे आकलन के साथ।"
@@ -49,6 +50,6 @@ export default async function PromisesPage() {
       ) : (
         <EmptyState title="अभी कोई सार्वजनिक वादा प्रकाशित नहीं है" />
       )}
-    </main>
+    </Container>
   )
 }

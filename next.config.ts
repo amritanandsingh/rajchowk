@@ -117,6 +117,14 @@ const nextConfig: NextConfig = {
   // NEVER set `output: 'standalone' | 'export'` — Amplify's SSR adapter builds
   // its own deployment bundle from the default `.next` output.
 
+  experimental: {
+    // Rewrites `import { Menu } from 'lucide-react'` to a direct per-icon path
+    // so the barrel's module graph is never walked. 12 files import from it and
+    // the whole icon set currently lands in one shared chunk; this trims that
+    // chunk to the icons actually referenced and cuts cold-build work.
+    optimizePackageImports: ['lucide-react'],
+  },
+
   eslint: {
     // Linting runs explicitly in `npm run verify` and in amplify.yml. Leaving
     // this false would make `next build` invoke the deprecated `next lint` path.

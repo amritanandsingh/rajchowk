@@ -1,5 +1,12 @@
 import { beforeAll, beforeEach, describe, expect, it, inject } from 'vitest'
-import { anonymousClient, clientFor, expectOk, resultCode, type Client } from './harness/clients'
+import {
+  anonymousClient,
+  clientFor,
+  expectOk,
+  expectRefused,
+  resultCode,
+  type Client,
+} from './harness/clients'
 import { counterOf, makePoll, openPoll, trackVote } from './harness/fixtures'
 import { resetRateLimitsForUser } from './harness/rate-limits'
 import { getRow } from './harness/tables'
@@ -131,7 +138,7 @@ describe('voting twice — the core guarantee', () => {
       'first vote',
     )
 
-    const changed = expectOk(
+    const changed = expectRefused(
       await member.mutations.castVote({ pollId: poll.id, pollOptionId: poll.optionIds[1]! }),
       'attempted change',
     )
@@ -181,11 +188,11 @@ describe('changing a vote', () => {
     )
     expect(resultCode(firstChange)).toBe('OK')
 
-    const secondChange = expectOk(
+    const secondChange = expectRefused(
       await member.mutations.castVote({ pollId: poll.id, pollOptionId: poll.optionIds[2]! }),
       'second change',
     )
-    expect(resultCode(secondChange)).toBe('CHANGE_LIMIT')
+    expect(secondChange.code).toBe('CHANGE_LIMIT')
 
     // The counters reflect the last ALLOWED state.
     expect(await counterOf('PollOption', poll.optionIds[1]!, 'voteCount')).toBe(1)
@@ -200,7 +207,7 @@ describe('rejected votes', () => {
     const [pollA, pollB] = await Promise.all([makePoll(admin), makePoll(admin)])
     trackVote(pollA.id, users.MEMBER.sub)
 
-    const result = expectOk(
+    const result = expectRefused(
       await member.mutations.castVote({ pollId: pollA.id, pollOptionId: pollB.optionIds[0]! }),
       'cross-poll vote',
     )
@@ -212,7 +219,7 @@ describe('rejected votes', () => {
 
   it('refuses a poll that is not open', async () => {
     const poll = await makePoll(admin, { open: false })
-    const result = expectOk(
+    const result = expectRefused(
       await member.mutations.castVote({ pollId: poll.id, pollOptionId: poll.optionIds[0]! }),
       'vote on draft poll',
     )
@@ -223,7 +230,7 @@ describe('rejected votes', () => {
     const poll = await makePoll(admin, { closesAt: '2020-01-01T00:00:00.000Z' })
     await openPoll(poll.id, 'OPEN')
 
-    const result = expectOk(
+    const result = expectRefused(
       await member.mutations.castVote({ pollId: poll.id, pollOptionId: poll.optionIds[0]! }),
       'vote on expired poll',
     )
@@ -231,7 +238,7 @@ describe('rejected votes', () => {
   })
 
   it('refuses a poll that does not exist', async () => {
-    const result = expectOk(
+    const result = expectRefused(
       await member.mutations.castVote({
         pollId: '00000000-0000-4000-8000-000000000000',
         pollOptionId: '00000000-0000-4000-8000-000000000001',

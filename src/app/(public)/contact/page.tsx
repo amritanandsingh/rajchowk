@@ -1,9 +1,10 @@
 import type { Metadata } from 'next'
 import { PageHeader } from '@/components/site/page-header'
+import { Container } from '@/components/ui/container'
 export const metadata: Metadata = { title: 'संपर्क', alternates: { canonical: '/contact' } }
 export default function ContactPage() {
   return (
-    <main id="content" className="mx-auto max-w-3xl px-4 py-10">
+    <Container width="prose">
       <PageHeader
         title="संपर्क"
         description="पाठकों की प्रतिक्रिया हमारी पत्रकारिता को बेहतर बनाती है।"
@@ -18,6 +19,6 @@ export default function ContactPage() {
           कृपया संबंधित लेख का लिंक और जिस अंश पर आपत्ति है उसका स्पष्ट विवरण भेजें।
         </p>
       </div>
-    </main>
+    </Container>
   )
 }

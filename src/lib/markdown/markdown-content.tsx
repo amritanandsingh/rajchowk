@@ -53,11 +53,39 @@ export function MarkdownContent({
   )
 }
 
+/**
+ * Sizes for article subheadings, by the level the EDITOR wrote.
+ *
+ * These have to be explicit. Tailwind's preflight resets every h1–h6 to
+ * `font-size: inherit`, and globals.css restores weight and line-height but not
+ * size — so a heading with no `text-*` class inherits 1rem from `body` while the
+ * paragraphs around it are `text-article` (1.125rem). Article subheadings were
+ * therefore rendering SMALLER than the body copy they introduce, and `##`,
+ * `###` and `####` were visually identical to each other.
+ *
+ * Keyed by the authored level rather than the rendered one, so the visual
+ * hierarchy an editor writes is what they get regardless of `headingOffset` —
+ * that prop exists to keep the document outline valid when the article body is
+ * nested under an h1, not to shrink the text.
+ *
+ * `mt` is larger than `mb` on purpose: a subheading belongs to the section it
+ * opens, so it should sit closer to the text below it than to the text above.
+ */
+const HEADING_CLASS: Record<number, string> = {
+  2: 'mt-10 mb-3 font-display text-2xl font-bold sm:text-3xl',
+  3: 'mt-8 mb-3 font-display text-xl font-bold sm:text-2xl',
+  4: 'mt-6 mb-2 font-display text-lg font-bold',
+}
+
 function markdownComponents(headingOffset: number): Components {
   const heading = (level: number) =>
     function Heading({ children, id }: ComponentPropsWithoutRef<'h2'>) {
       const clamped = Math.min(level + headingOffset, 6)
-      return createElement(`h${clamped}`, { id, className: 'scroll-mt-20' }, children)
+      return createElement(
+        `h${clamped}`,
+        { id, className: `scroll-mt-20 text-balance ${HEADING_CLASS[level] ?? HEADING_CLASS[4]}` },
+        children,
+      )
     }
 
   return {

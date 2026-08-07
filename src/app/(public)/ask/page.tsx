@@ -1,11 +1,11 @@
 import type { Metadata } from 'next'
-import { QuestionForm } from '@/components/forms/question-form'
-import { QuestionUpvote } from '@/components/forms/question-upvote'
+import { LazyQuestionForm, LazyQuestionUpvote } from '@/components/forms/lazy'
 import { EmptyState } from '@/components/site/empty-state'
 import { PageHeader } from '@/components/site/page-header'
 import { listApprovedQuestions } from '@/lib/amplify/queries'
 import { formatDate } from '@/lib/format'
 import { getDictionary } from '@/lib/i18n'
+import { Container } from '@/components/ui/container'
 
 export const revalidate = 60
 export const metadata: Metadata = { title: 'राज चौक से पूछें', alternates: { canonical: '/ask' } }
@@ -14,7 +14,7 @@ export default async function AskPage() {
   const dict = getDictionary('hi')
   const { items } = await listApprovedQuestions({ limit: 20 })
   return (
-    <main id="content" tabIndex={-1} className="mx-auto max-w-5xl px-4 py-8 sm:py-10">
+    <Container>
       <PageHeader
         title={dict.questions.title}
         description="राजनीति, नीति और जनहित पर अपना सवाल भेजें। चुने गए सवालों का स्पष्ट जवाब दिया जाएगा।"
@@ -48,7 +48,7 @@ export default async function AskPage() {
                     </div>
                   )}
                   <div className="mt-4">
-                    <QuestionUpvote
+                    <LazyQuestionUpvote
                       questionId={question.id}
                       initialCount={question.upvoteCount ?? 0}
                     />
@@ -61,9 +61,9 @@ export default async function AskPage() {
           )}
         </section>
         <aside>
-          <QuestionForm />
+          <LazyQuestionForm />
         </aside>
       </div>
-    </main>
+    </Container>
   )
 }

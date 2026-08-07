@@ -1,4 +1,4 @@
-import { listPublishedArticles } from '@/lib/amplify/queries'
+import { listPublishedArticlesSlow } from '@/lib/amplify/queries'
 import { absoluteUrl, env } from '@/lib/env'
 
 export const dynamic = 'force-static'
@@ -9,7 +9,7 @@ function xmlEscape(value: string): string {
 }
 
 export async function GET(): Promise<Response> {
-  const { items } = await listPublishedArticles({ limit: 24 })
+  const { items } = await listPublishedArticlesSlow({ limit: 24 })
   const cutoff = Date.now() - 48 * 60 * 60 * 1000
   const recent = items.filter(
     (article) => article.publishedAt && new Date(article.publishedAt).getTime() >= cutoff,

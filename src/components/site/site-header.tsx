@@ -2,14 +2,27 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Menu, Moon, Search, Sun, UserRound, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { Menu, MonitorSmartphone, Moon, Search, Sun, UserRound, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { useDictionary, useLocale } from '@/components/providers'
 import { buttonVariants } from '@/components/ui/button'
+import { Wordmark } from '@/components/site/logo'
 import { SkipLink } from '@/components/ui/skip-link'
-import { THEME_STORAGE_KEY } from '@/components/theme-script'
+import type { ThemePreference } from '@/components/theme-script'
+import { useTheme } from '@/components/use-theme'
 import { LOCALE_LABELS, type Locale } from '@/lib/i18n'
+import type { Dictionary } from '@/lib/i18n'
 import { cn } from '@/lib/utils/cn'
+
+/**
+ * The label names the state the button will move TO, not the current one — an
+ * icon button's accessible name has to describe its action.
+ */
+const THEME_LABEL_KEY: Record<ThemePreference, (dict: Dictionary) => string> = {
+  light: (dict) => dict.nav.themeDark,
+  dark: (dict) => dict.nav.themeSystem,
+  system: (dict) => dict.nav.themeLight,
+}
 
 const primaryLinks = [
   ['/', 'home'],
@@ -26,29 +39,32 @@ export function SiteHeader() {
   const { locale, setLocale } = useLocale()
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
-  const [dark, setDark] = useState(false)
-  const [hydrated, setHydrated] = useState(false)
+  const { preference, mounted, cycle } = useTheme()
+  const menuButtonRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => setOpen(false), [pathname])
-  useEffect(() => {
-    setDark(document.documentElement.classList.contains('dark'))
-    setHydrated(true)
-  }, [])
 
-  function toggleTheme() {
-    const next = !dark
-    document.documentElement.classList.toggle('dark', next)
-    localStorage.setItem(THEME_STORAGE_KEY, next ? 'dark' : 'light')
-    document.documentElement.style.colorScheme = next ? 'dark' : 'light'
-    setDark(next)
-  }
+  // Close the mobile panel on Escape, and trap nothing else — the panel is a
+  // plain disclosure, not a modal. Without this, a keyboard reader who opened
+  // the menu had no way to dismiss it but to tab through every link in it.
+  useEffect(() => {
+    if (!open) return
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setOpen(false)
+        menuButtonRef.current?.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [open])
 
   return (
     <header className="sticky top-0 z-50 border-b border-border bg-bg/95 shadow-sticky backdrop-blur">
       <SkipLink targetId="content" label={dict.nav.skipToContent} />
       <div className="mx-auto flex h-14 max-w-7xl items-center gap-2 px-4">
-        <Link href="/" className="mr-auto font-display text-xl font-bold text-brand no-underline">
-          {dict.siteName}
+        <Link href="/" className="mr-auto no-underline">
+          <Wordmark siteName={dict.siteName} />
         </Link>
 
         <nav aria-label={dict.a11y.mainNavigation} className="hidden items-center gap-1 lg:flex">
@@ -81,22 +97,28 @@ export function SiteHeader() {
         >
           <UserRound aria-hidden="true" className="size-5" />
         </Link>
+        {/* Cycles light -> dark -> system. Before hydration the stored
+            preference is unreadable, so the icon renders as the neutral
+            "system" state rather than guessing and then flipping. */}
         <button
           type="button"
-          onClick={toggleTheme}
-          aria-label={dark ? dict.nav.themeLight : dict.nav.themeDark}
+          onClick={cycle}
+          aria-label={THEME_LABEL_KEY[preference](dict)}
           className={buttonVariants({ variant: 'ghost', size: 'icon' })}
         >
-          {dark ? (
+          {!mounted || preference === 'system' ? (
+            <MonitorSmartphone aria-hidden="true" className="size-5" />
+          ) : preference === 'dark' ? (
             <Sun aria-hidden="true" className="size-5" />
           ) : (
             <Moon aria-hidden="true" className="size-5" />
           )}
         </button>
         <button
+          ref={menuButtonRef}
           type="button"
           onClick={() => setOpen((value) => !value)}
-          disabled={!hydrated}
+          disabled={!mounted}
           aria-expanded={open}
           aria-controls="mobile-navigation"
           aria-label={open ? dict.nav.closeMenu : dict.nav.menu}

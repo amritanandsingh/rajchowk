@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import Image from 'next/image'
 import { notFound, permanentRedirect } from 'next/navigation'
+import { Suspense } from 'react'
 import { ArticleBody, ArticleMeta } from '@/components/editorial/article-body'
 import { CommentsSection } from '@/components/editorial/comments-section'
 import { JsonLd } from '@/components/seo/json-ld'
@@ -14,6 +15,7 @@ import { absoluteUrl, env } from '@/lib/env'
 import { DEFAULT_LOCALE, getDictionary, OG_LOCALES } from '@/lib/i18n'
 import { mediaUrl } from '@/lib/media'
 import { buildArticleLd, buildBreadcrumbLd } from '@/lib/seo/jsonld'
+import { Container } from '@/components/ui/container'
 
 /**
  * The article page — the reference implementation for every public route.
@@ -28,6 +30,44 @@ export const revalidate = 60
 export const dynamicParams = true
 
 type Props = { params: Promise<{ slug: string }> }
+
+/**
+ * Comments, fetched inside their own Suspense boundary.
+ *
+ * The await has to live in a child component, not in the page body: this is a
+ * SECOND AppSync round trip that cannot start until the article resolves (it
+ * needs article.id), and while it sat in the page it blocked the headline on a
+ * section that is below the fold and below the entire article body. Streaming
+ * it means first paint no longer waits for it.
+ */
+async function Comments({
+  articleId,
+  allowComments,
+  dict,
+}: {
+  articleId: string
+  allowComments: boolean
+  dict: ReturnType<typeof getDictionary>
+}) {
+  const { items } = await listApprovedComments(articleId, { limit: 20 })
+  return (
+    <CommentsSection
+      articleId={articleId}
+      comments={items}
+      allowComments={allowComments}
+      dict={dict}
+    />
+  )
+}
+
+function CommentsFallback() {
+  return (
+    <div aria-busy="true" className="mt-12 space-y-3">
+      <div className="h-7 w-40 animate-pulse rounded bg-bg-subtle" />
+      <div className="h-24 animate-pulse rounded-card bg-bg-subtle" />
+    </div>
+  )
+}
 
 /**
  * Prerender the most recent articles at build time; everything older is
@@ -101,7 +141,6 @@ export default async function NewsArticlePage({ params }: Props) {
 
   const path = `${article.contentType === 'OPINION' ? '/opinion' : '/news'}/${article.slug}`
   const heroImage = mediaUrl(article.heroImageKey)
-  const { items: comments } = await listApprovedComments(article.id, { limit: 20 })
 
   return (
     <>
@@ -119,7 +158,7 @@ export default async function NewsArticlePage({ params }: Props) {
         ]}
       />
 
-      <main id="content" tabIndex={-1} className="mx-auto max-w-3xl px-4 py-8 sm:py-12">
+      <Container width="prose">
         <article>
           <header className="mb-8">
             <h1 className="font-display text-3xl leading-tight font-bold text-balance sm:text-4xl">
@@ -152,14 +191,15 @@ export default async function NewsArticlePage({ params }: Props) {
           )}
 
           <ArticleBody article={article} dict={dict} />
-          <CommentsSection
-            articleId={article.id}
-            comments={comments}
-            allowComments={article.allowComments !== false}
-            dict={dict}
-          />
+          <Suspense fallback={<CommentsFallback />}>
+            <Comments
+              articleId={article.id}
+              allowComments={article.allowComments !== false}
+              dict={dict}
+            />
+          </Suspense>
         </article>
-      </main>
+      </Container>
     </>
   )
 }
