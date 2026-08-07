@@ -172,9 +172,18 @@ const schema = a
         displayOrder: a.integer().default(100),
         isActive: a.boolean().default(true),
         articles: a.hasMany('Article', 'categoryId'),
+        // publicApiKey is NOT optional here even though the model-level rule
+        // below already grants it. A field-level authorization REPLACES the
+        // model's rules for that field, so omitting it made every apiKey read
+        // fail this one field — and because unwrap() in
+        // src/lib/amplify/queries.ts returns null on ANY errors[], the whole
+        // listCategories() call returned [] and /sitemap.xml emitted no
+        // category URLs at all. The field must list every principal the model
+        // does, minus the writes.
         publishedArticleCount: a
           .integer()
           .authorization((allow) => [
+            allow.publicApiKey().to(['read']),
             allow.guest().to(['read']),
             allow.authenticated().to(['read']),
           ]),
@@ -199,9 +208,11 @@ const schema = a
         nameEn: a.string().required(),
         isActive: a.boolean().default(true),
         articles: a.hasMany('ArticleTag', 'tagId'),
+        // Same field-auth trap as Category.publishedArticleCount above.
         publishedArticleCount: a
           .integer()
           .authorization((allow) => [
+            allow.publicApiKey().to(['read']),
             allow.guest().to(['read']),
             allow.authenticated().to(['read']),
           ]),

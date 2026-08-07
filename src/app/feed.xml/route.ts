@@ -1,4 +1,4 @@
-import { listPublishedArticles } from '@/lib/amplify/queries'
+import { listPublishedArticlesSlow } from '@/lib/amplify/queries'
 import { absoluteUrl, env } from '@/lib/env'
 import { getDictionary } from '@/lib/i18n'
 
@@ -34,7 +34,7 @@ function xmlEscape(value: string): string {
 
 export async function GET(): Promise<Response> {
   const dict = getDictionary('hi')
-  const { items } = await listPublishedArticles({ limit: ITEM_COUNT })
+  const { items } = await listPublishedArticlesSlow({ limit: ITEM_COUNT })
 
   const entries = items
     .map((article) => {

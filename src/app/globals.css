@@ -16,7 +16,7 @@
 /* --------------------------------------------------------------------------
    Raw palette. Editorial, serious, high contrast — deliberately not the
    saturated red/yellow of Indian TV news. All pairs used for text are
-   verified against WCAG AA by src/lib/design/contrast.test.ts.
+   verified against WCAG AA by src/lib/design/color.test.ts.
    -------------------------------------------------------------------------- */
 :root {
   /* Surfaces — warm off-white, not clinical grey */
@@ -179,7 +179,9 @@
   --color-tone-sponsored-bg: var(--tone-sponsored-bg);
 
   /* next/font injects these as CSS variables on <html>. */
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  /* No webfont here on purpose. Nothing in the app uses `font-sans` — body is
+     pinned to --font-hindi — so this is only the fallback Tailwind needs. */
+  --font-sans: ui-sans-serif, system-ui, sans-serif;
   --font-hindi: var(--font-noto-devanagari), 'Noto Sans Devanagari', sans-serif;
   --font-display: var(--font-noto-serif-devanagari), 'Noto Serif Devanagari', serif;
 }
@@ -192,27 +194,11 @@
      above and below the baseline and collide at Latin line-heights. */
   --text-article: 1.125rem;
   --text-article--line-height: 1.9;
-  --text-article-lg: 1.1875rem;
-  --text-article-lg--line-height: 1.9;
-
-  --breakpoint-xs: 22.5rem;
-
   --radius-card: 0.5rem;
 
   --shadow-card: 0 1px 2px oklch(0 0 0 / 0.05), 0 1px 3px oklch(0 0 0 / 0.06);
   --shadow-raised: 0 4px 6px -1px oklch(0 0 0 / 0.08), 0 2px 4px -2px oklch(0 0 0 / 0.06);
   --shadow-sticky: 0 1px 3px oklch(0 0 0 / 0.08);
-
-  --animate-fade-in: fade-in 0.2s ease-out;
-
-  @keyframes fade-in {
-    from {
-      opacity: 0;
-    }
-    to {
-      opacity: 1;
-    }
-  }
 }
 
 /* --------------------------------------------------------------------------

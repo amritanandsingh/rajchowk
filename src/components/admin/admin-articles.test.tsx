@@ -2,6 +2,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AdminArticles } from './admin-articles'
+import { resetStaffGroupsCache } from './use-staff-groups'
 
 /**
  * The article-creation surface.
@@ -74,6 +75,11 @@ const session = (groups: string[]) => ({
 // implementation between tests. They have to be (re)assigned here, not at
 // module scope.
 beforeEach(() => {
+  // useStaffGroups caches the decoded token in module scope so the same
+  // session is not re-fetched by every staff component. Vitest keeps modules
+  // between cases, so without this every test after the first would see the
+  // first test's role.
+  resetStaffGroupsCache()
   mocks.listArticles.mockResolvedValue({ data: [], errors: undefined })
   mocks.listCategories.mockResolvedValue({ data: [], errors: undefined })
   mocks.categoryBySlug.mockResolvedValue({ data: [], errors: undefined })
@@ -264,14 +270,15 @@ describe('saving the article', () => {
 })
 
 describe('role gating', () => {
+  const oneDraft = {
+    data: [{ id: 'art-1', title: 'पहला लेख', contentType: 'NEWS', status: 'DRAFT' }],
+    errors: undefined,
+  }
+
   it('gives a MODERATOR a read-only view', async () => {
-    // Article grants MODERATOR read only, and publishArticle is
-    // allow.groups(STAFF) — so offering either control would be a dead end.
+    // Article grants MODERATOR read only — offering any control is a dead end.
     mocks.fetchAuthSession.mockResolvedValue(session(['MODERATOR']))
-    mocks.listArticles.mockResolvedValue({
-      data: [{ id: 'art-1', title: 'पहला लेख', contentType: 'NEWS', status: 'DRAFT' }],
-      errors: undefined,
-    })
+    mocks.listArticles.mockResolvedValue(oneDraft)
 
     render(<AdminArticles />)
 
@@ -282,8 +289,69 @@ describe('role gating', () => {
     expect(screen.getByRole('status')).toHaveTextContent('अनुमति नहीं है')
   })
 
-  it('lets an EDITOR write', async () => {
+  it('lets an EDITOR write and submit for review, but NOT publish', async () => {
+    // PUBLISH/UNPUBLISH are adminOnly in the transition table and the publish
+    // function enforces it, so an editor offered this button would only ever
+    // get "आपके पास इसकी अनुमति नहीं है".
+    //
+    // But hiding it must not leave the editor with NOTHING. SUBMIT_FOR_REVIEW
+    // is the non-admin transition out of DRAFT, and it is the entire reason
+    // publishArticle is allow.groups(STAFF) rather than allow.group(ADMIN).
+    // Before this, an editor's article could never leave DRAFT by any route
+    // the UI offered.
+    mocks.listArticles.mockResolvedValue(oneDraft)
+
     render(<AdminArticles />)
+
     expect(await screen.findByRole('button', { name: 'नया लेख' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'प्रकाशित करें' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'समीक्षा के लिए भेजें' })).toBeInTheDocument()
+  })
+
+  it('sends SUBMIT_FOR_REVIEW when an editor uses it', async () => {
+    mocks.listArticles.mockResolvedValue(oneDraft)
+    mocks.publishArticle.mockResolvedValue({
+      data: { ok: true, code: 'OK', status: 'IN_REVIEW', revisionNumber: 1 },
+      errors: undefined,
+    })
+
+    render(<AdminArticles />)
+    await userEvent.click(await screen.findByRole('button', { name: 'समीक्षा के लिए भेजें' }))
+
+    expect(mocks.publishArticle).toHaveBeenCalledTimes(1)
+    expect(mocks.publishArticle.mock.calls[0]?.[0]).toMatchObject({
+      articleId: 'art-1',
+      action: 'SUBMIT_FOR_REVIEW',
+    })
+    // The row is patched from the mutation's own response rather than refetched.
+    expect(await screen.findByText('समीक्षा में')).toBeInTheDocument()
+  })
+
+  it('lets an ADMIN publish', async () => {
+    mocks.fetchAuthSession.mockResolvedValue(session(['ADMIN']))
+    mocks.listArticles.mockResolvedValue(oneDraft)
+
+    render(<AdminArticles />)
+
+    expect(await screen.findByRole('button', { name: 'प्रकाशित करें' })).toBeInTheDocument()
+  })
+
+  it('reports a refused transition by CODE, not the generic fallback', async () => {
+    // The failure this whole change exists to make visible. A publish that
+    // could never succeed used to read "कृपया फिर से कोशिश करें", which is
+    // advice that cannot work — the code is what says whether a retry helps.
+    mocks.fetchAuthSession.mockResolvedValue(session(['ADMIN']))
+    mocks.listArticles.mockResolvedValue(oneDraft)
+    mocks.publishArticle.mockResolvedValue({
+      data: { ok: false, code: 'CONFLICT', message: 'अभी पूरा नहीं हो सका।' },
+      errors: undefined,
+    })
+
+    render(<AdminArticles />)
+    await userEvent.click(await screen.findByRole('button', { name: 'प्रकाशित करें' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('स्थिति बदल गई है')
+    // The row must not have moved: the transition was refused.
+    expect(screen.getByText('ड्राफ़्ट')).toBeInTheDocument()
   })
 })

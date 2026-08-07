@@ -3,6 +3,7 @@ import { ArticleGrid } from '@/components/editorial/article-grid'
 import { EmptyState } from '@/components/site/empty-state'
 import { PageHeader } from '@/components/site/page-header'
 import { getCategoryBySlug, listArticlesByCategory } from '@/lib/amplify/queries'
+import { Container } from '@/components/ui/container'
 
 export const revalidate = 60
 type Props = { params: Promise<{ slug: string }> }
@@ -13,7 +14,7 @@ export default async function CategoryPage({ params }: Props) {
   if (!category) notFound()
   const { items } = await listArticlesByCategory(category.id, { limit: 24 })
   return (
-    <main id="content" tabIndex={-1} className="mx-auto max-w-7xl px-4 py-8 sm:py-10">
+    <Container>
       <PageHeader
         eyebrow="श्रेणी"
         title={category.nameHi}
@@ -24,6 +25,6 @@ export default async function CategoryPage({ params }: Props) {
       ) : (
         <EmptyState title="इस श्रेणी में अभी कोई खबर नहीं है" />
       )}
-    </main>
+    </Container>
   )
 }

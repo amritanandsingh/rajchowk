@@ -4,6 +4,7 @@ import { EmptyState } from '@/components/site/empty-state'
 import { PageHeader } from '@/components/site/page-header'
 import { listPublishedArticles } from '@/lib/amplify/queries'
 import { getDictionary } from '@/lib/i18n'
+import { Container } from '@/components/ui/container'
 
 export const revalidate = 60
 export const metadata: Metadata = { title: 'ताज़ा खबरें', alternates: { canonical: '/latest' } }
@@ -13,7 +14,7 @@ export default async function LatestPage() {
   const { items } = await listPublishedArticles({ limit: 24 })
   return (
     <>
-      <main id="content" tabIndex={-1} className="mx-auto max-w-7xl px-4 py-8 sm:py-10">
+      <Container>
         <PageHeader
           title={dict.nav.latest}
           description="देश, राज्य और राजनीति की सबसे नई खबरें और स्पष्ट संदर्भ।"
@@ -23,7 +24,7 @@ export default async function LatestPage() {
         ) : (
           <EmptyState title="अभी कोई खबर नहीं है" />
         )}
-      </main>
+      </Container>
     </>
   )
 }

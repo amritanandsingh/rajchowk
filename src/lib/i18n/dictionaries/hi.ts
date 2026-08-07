@@ -9,6 +9,7 @@
 export const hi = {
   siteName: 'राज चौक',
   tagline: 'खबर, विश्लेषण और आपकी राय',
+  footerBlurb: 'स्वतंत्र खबरें, स्पष्ट विश्लेषण और जवाबदेह पत्रकारिता।',
 
   nav: {
     home: 'होम',
@@ -33,6 +34,10 @@ export const hi = {
     themeLight: 'दिन',
     themeDark: 'रात',
     themeSystem: 'सिस्टम',
+    editorialPolicy: 'संपादकीय नीति',
+    correctionsPolicy: 'सुधार नीति',
+    contact: 'संपर्क',
+    rssFeed: 'RSS फ़ीड',
   },
 
   article: {
@@ -187,6 +192,24 @@ export const hi = {
     rateLimited: 'बहुत सारे अनुरोध। कृपया थोड़ी देर बाद कोशिश करें।',
     validation: 'फ़ॉर्म में {count} त्रुटियाँ हैं',
     goHome: 'होम पर जाएँ',
+    // Shown under the error boundary. The digest is the only handle a reader
+    // can give support that ties their blank page to a specific server log.
+    digest: 'त्रुटि कोड: {digest}',
+
+    // One entry per ResultCode returned by the Lambdas. See
+    // src/lib/domain/result-code.ts for why this mapping exists at all.
+    invalidInput: 'दी गई जानकारी सही नहीं है।',
+    conflict: 'यह लेख पहले ही प्रकाशित हो चुका है, या इसकी स्थिति बदल गई है। पृष्ठ ताज़ा करें।',
+    internal: 'सर्वर पर कुछ गड़बड़ हो गई। कृपया थोड़ी देर बाद कोशिश करें।',
+    alreadyVoted: 'आप इस जनमत में पहले ही वोट दे चुके हैं।',
+    pollClosed: 'यह जनमत अभी खुला नहीं है।',
+    invalidOption: 'यह विकल्प इस जनमत का नहीं है।',
+    changeLimit: 'आप अपना वोट अधिकतम बार बदल चुके हैं।',
+    notAvailable: 'यह अभी उपलब्ध नहीं है।',
+    depthExceeded: 'इस टिप्पणी पर और जवाब नहीं दिए जा सकते।',
+    duplicate: 'यह पहले ही भेजा जा चुका है।',
+    commentsClosed: 'इस लेख पर टिप्पणियाँ बंद हैं।',
+    suspended: 'आपका खाता अभी निलंबित है।',
   },
 
   a11y: {

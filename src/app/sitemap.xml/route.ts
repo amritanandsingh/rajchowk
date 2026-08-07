@@ -1,4 +1,8 @@
-import { listCategories, listPromises, listPublishedArticles } from '@/lib/amplify/queries'
+import {
+  listCategoriesHourly,
+  listPromisesHourly,
+  listPublishedArticlesHourly,
+} from '@/lib/amplify/queries'
 import { absoluteUrl } from '@/lib/env'
 
 export const dynamic = 'force-static'
@@ -10,10 +14,10 @@ function xmlEscape(value: string): string {
 
 export async function GET(): Promise<Response> {
   const [articles, opinions, promises, categories] = await Promise.all([
-    listPublishedArticles({ limit: 24 }),
-    listPublishedArticles({ contentType: 'OPINION', limit: 24 }),
-    listPromises({ limit: 24 }),
-    listCategories(),
+    listPublishedArticlesHourly({ limit: 24 }),
+    listPublishedArticlesHourly({ contentType: 'OPINION', limit: 24 }),
+    listPromisesHourly({ limit: 24 }),
+    listCategoriesHourly(),
   ])
   const staticPaths = [
     '/',
@@ -46,11 +50,12 @@ export async function GET(): Promise<Response> {
       lastmod: promise.lastVerifiedAt ?? undefined,
     })),
     ...categories
-      // Editors can now create a category from the article form, so an empty
-      // one can exist for as long as its first article stays in draft. Listing
-      // it would submit a page that renders nothing but "no news yet" — thin
-      // content, and a crawl budget spent on it. publishedArticleCount is
-      // maintained by the publish Lambda, so this self-corrects on publish.
+      // Editors can create a category from the article form, so an empty one
+      // can exist for as long as its first article stays in draft. Listing it
+      // would submit a page that renders nothing but "no news yet" — thin
+      // content, and crawl budget spent on it. publishedArticleCount is
+      // maintained by syncCategoryCount in the publish function, so this
+      // self-corrects the moment the category's first article goes live.
       .filter((category) => Boolean(category.slug) && (category.publishedArticleCount ?? 0) > 0)
       .map((category) => ({
         path: `/category/${category.slug}`,

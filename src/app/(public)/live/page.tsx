@@ -1,11 +1,12 @@
 import { CalendarPlus, ExternalLink, Radio } from 'lucide-react'
 import type { Metadata } from 'next'
-import { EventRegistrationButton } from '@/components/forms/event-registration-button'
+import { LazyEventRegistrationButton } from '@/components/forms/lazy'
 import { EmptyState } from '@/components/site/empty-state'
 import { PageHeader } from '@/components/site/page-header'
 import { listLiveEvents } from '@/lib/amplify/queries'
 import { formatDateTime } from '@/lib/format'
 import { getDictionary } from '@/lib/i18n'
+import { Container } from '@/components/ui/container'
 
 export const revalidate = 30
 export const metadata: Metadata = { title: 'लाइव चर्चा', alternates: { canonical: '/live' } }
@@ -37,7 +38,7 @@ export default async function LivePage() {
   const dict = getDictionary('hi')
   const { items } = await listLiveEvents({ limit: 20 })
   return (
-    <main id="content" tabIndex={-1} className="mx-auto max-w-5xl px-4 py-8 sm:py-10">
+    <Container>
       <PageHeader
         title={dict.live.title}
         description="सीधी बातचीत, सवाल-जवाब और रिकॉर्डिंग—सब एक जगह।"
@@ -71,7 +72,7 @@ export default async function LivePage() {
                 {event.description && <p className="mt-3 text-fg-muted">{event.description}</p>}
                 <div className="mt-5 flex flex-wrap items-center gap-3">
                   {event.registrationEnabled && event.status !== 'COMPLETED' && (
-                    <EventRegistrationButton eventId={event.id} />
+                    <LazyEventRegistrationButton eventId={event.id} />
                   )}
                   {addToCalendar && (
                     <a
@@ -103,6 +104,6 @@ export default async function LivePage() {
       ) : (
         <EmptyState title="अभी कोई लाइव चर्चा निर्धारित नहीं है" />
       )}
-    </main>
+    </Container>
   )
 }

@@ -1,10 +1,11 @@
 import type { Metadata } from 'next'
 import { PageHeader } from '@/components/site/page-header'
+import { Container } from '@/components/ui/container'
 
 export const metadata: Metadata = { title: 'हमारे बारे में', alternates: { canonical: '/about' } }
 export default function AboutPage() {
   return (
-    <main id="content" tabIndex={-1} className="mx-auto max-w-3xl px-4 py-10">
+    <Container width="prose">
       <PageHeader
         title="हमारे बारे में"
         description="राज चौक खबर, विश्लेषण और नागरिक भागीदारी का स्वतंत्र हिंदी मंच है।"
@@ -25,6 +26,6 @@ export default function AboutPage() {
           </p>
         </section>
       </div>
-    </main>
+    </Container>
   )
 }

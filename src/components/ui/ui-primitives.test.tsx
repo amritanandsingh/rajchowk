@@ -128,9 +128,11 @@ describe('SkipLink', () => {
 
   it('sits above the sticky header when focused', () => {
     // A skip link rendered behind the header looks broken to exactly the users
-    // it exists for. Header is z-40.
+    // it exists for. The header is z-50 — both this test and the component's
+    // own doc comment used to say z-40, so the skip link was pinned to the same
+    // layer as the thing it has to clear and the assertion agreed with the bug.
     render(<SkipLink targetId="content" label="जाएँ" />)
-    expect(screen.getByRole('link').className).toContain('focus:z-50')
+    expect(screen.getByRole('link').className).toContain('focus:z-[60]')
   })
 
   it('is the first focusable element on the page', async () => {

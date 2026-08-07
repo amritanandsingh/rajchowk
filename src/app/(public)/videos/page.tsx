@@ -3,6 +3,7 @@ import { ArticleGrid } from '@/components/editorial/article-grid'
 import { EmptyState } from '@/components/site/empty-state'
 import { PageHeader } from '@/components/site/page-header'
 import { listPublishedArticles } from '@/lib/amplify/queries'
+import { Container } from '@/components/ui/container'
 
 export const revalidate = 60
 export const metadata: Metadata = { title: 'वीडियो', alternates: { canonical: '/videos' } }
@@ -11,7 +12,7 @@ export default async function VideosPage() {
   const { items } = await listPublishedArticles({ limit: 24 })
   const videos = items.filter((item) => Boolean(item.youtubeVideoId))
   return (
-    <main id="content" tabIndex={-1} className="mx-auto max-w-7xl px-4 py-8 sm:py-10">
+    <Container>
       <PageHeader
         title="वीडियो"
         description="राज चौक के वीडियो विश्लेषण, साक्षात्कार और व्याख्या।"
@@ -21,6 +22,6 @@ export default async function VideosPage() {
       ) : (
         <EmptyState title="अभी कोई वीडियो प्रकाशित नहीं है" />
       )}
-    </main>
+    </Container>
   )
 }

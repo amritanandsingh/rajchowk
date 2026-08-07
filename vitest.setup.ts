@@ -9,7 +9,6 @@ afterEach(() => {
 // next/font is a build-time transform that Vitest does not run, so components
 // importing it would otherwise fail to resolve.
 vi.mock('next/font/google', () => ({
-  Inter: () => ({ variable: '--font-inter', className: 'font-inter' }),
   Noto_Sans_Devanagari: () => ({
     variable: '--font-noto-devanagari',
     className: 'font-noto-devanagari',

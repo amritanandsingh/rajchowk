@@ -4,6 +4,7 @@ import { Clock3, MessageCircle } from 'lucide-react'
 import type { ArticleCard as ArticleCardData } from '@/lib/amplify/queries'
 import { formatDate } from '@/lib/format'
 import { mediaUrl } from '@/lib/media'
+import { cardVariants } from '@/components/ui/card'
 import { cn } from '@/lib/utils/cn'
 
 const typeLabels: Record<string, string> = {
@@ -32,7 +33,8 @@ export function ArticleCard({
   return (
     <article
       className={cn(
-        'group overflow-hidden rounded-card border border-border bg-surface shadow-card',
+        cardVariants({ variant: 'surface', padding: 'none' }),
+        'group overflow-hidden',
         featured && 'md:grid md:grid-cols-2',
       )}
     >
@@ -51,6 +53,13 @@ export function ArticleCard({
             alt=""
             fill
             sizes={featured ? '(min-width: 768px) 50vw, 100vw' : '(min-width: 1024px) 33vw, 100vw'}
+            // The featured card is the hero on / and /latest, which makes this
+            // the LCP element on the highest-traffic page. Without `priority`
+            // it is lazy-loaded like every card below the fold, so the largest
+            // paint waits for the image to be discovered by the scanner rather
+            // than being preloaded in the initial HTML. The article page
+            // already does this; the homepage did not.
+            priority={featured}
             className="object-cover transition-transform duration-300 group-hover:scale-[1.02] motion-reduce:transition-none"
           />
         </Link>

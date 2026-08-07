@@ -38,7 +38,8 @@
     "verify": "npm run verify:lock && npm run format:check && npm run lint && npm run typecheck:all && npm run test && npm run build",
     "verify:full": "npm run verify && npm run test:integration && npm run e2e:mocked",
     "verify:backend": "tsx scripts/verify-backend.ts",
-    "role:grant": "tsx scripts/grant-role.ts"
+    "role:grant": "tsx scripts/grant-role.ts",
+    "icons": "tsx scripts/generate-icons.ts"
   },
   "scriptsRationale": {
     "verify:lock": "First step of `verify`, because a package-lock.json that has drifted out of sync with package.json fails `npm ci` in the Amplify backend phase — before any code is compiled — and every other check here would still pass locally against a stale node_modules. That is exactly how a corrupted lock reached main once. `--dry-run` writes nothing. It may reach the registry for metadata, so a fully offline run needs `npm run verify:lock -- --offline`."
@@ -59,16 +60,13 @@
     "@aws-sdk/client-dynamodb": "3.1101.0",
     "@aws-sdk/client-sesv2": "3.1101.0",
     "@aws-sdk/lib-dynamodb": "3.1101.0",
-    "@hookform/resolvers": "5.6.0",
     "aws-amplify": "6.20.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
-    "date-fns": "4.4.0",
     "lucide-react": "1.28.0",
     "next": "15.5.22",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "react-hook-form": "7.84.0",
     "react-markdown": "10.1.0",
     "rehype-sanitize": "6.0.0",
     "remark-directive": "4.0.0",

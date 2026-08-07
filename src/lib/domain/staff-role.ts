@@ -48,7 +48,29 @@ export function canCreateCategory(groups: readonly string[]): boolean {
   return hasAny(groups, WRITER_GROUPS)
 }
 
-/** `publishArticle` is `allow.groups(STAFF)`; the handler narrows PUBLISH itself to ADMIN. */
+/**
+ * Administrator, as the transition table means it.
+ *
+ * This is the `isAdmin` that `availableActions(from, isAdmin)` in
+ * article-status.ts expects, and it must agree with `isAdmin` in
+ * amplify/functions/shared/identity.ts — the handler re-derives the same
+ * predicate from the verified claim, so a disagreement here shows up as a
+ * button that always fails rather than as a security hole.
+ */
+export function isAdmin(groups: readonly string[]): boolean {
+  return hasAny(groups, [GROUP.ADMIN])
+}
+
+/**
+ * Only an administrator may publish or unpublish.
+ *
+ * The `publishArticle` mutation is `allow.groups(STAFF)`, which admits EDITOR —
+ * but that is because editors legitimately call SUBMIT_FOR_REVIEW and
+ * RETURN_TO_DRAFT through the same mutation. PUBLISH and UNPUBLISH are
+ * `adminOnly: true` in the transition table, and the handler enforces it. So
+ * this must follow the transition table, not the directive: matching the
+ * directive would offer an editor a button the backend always refuses.
+ */
 export function canPublish(groups: readonly string[]): boolean {
-  return hasAny(groups, WRITER_GROUPS)
+  return isAdmin(groups)
 }

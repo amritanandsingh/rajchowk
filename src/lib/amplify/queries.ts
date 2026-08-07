@@ -78,7 +78,45 @@ function unwrap<T>(
 
 const emptyPage = <T>(): Page<T> => ({ items: [], nextToken: null })
 
-export const listPublishedArticles = unstable_cache(
+/**
+ * Cache lifetimes, named for the surface that needs them.
+ *
+ * Next lowers a route's effective `revalidate` to the SMALLEST value it finds
+ * anywhere in that route, including inside `unstable_cache`. Every wrapper in
+ * this file hard-coded 60, which silently overrode the longer TTLs the XML
+ * routes declare for themselves: /sitemap.xml asks for 3600 and got 60 — sixty
+ * times the intended work, four parallel AppSync calls each time — while
+ * /feed.xml and /news-sitemap.xml asked for 300 and also got 60. The build
+ * output in .next/prerender-manifest.json showed 60 for all of them.
+ *
+ * On Amplify Hosting there is no on-demand ISR, so a TTL is the only freshness
+ * lever there is, and spending it on a sitemap nobody reads sixty times an hour
+ * is pure cost.
+ */
+export const TTL = {
+  /** Reader-facing pages: a story must appear within a minute of publishing. */
+  page: 60,
+  /** Syndication and slow-changing pages. Feed readers poll on their own schedule. */
+  slow: 300,
+  /** Sitemaps. Crawlers re-fetch on their own cadence; freshness is cheap here. */
+  sitemap: 3600,
+} as const
+
+/**
+ * Build one cached variant of a loader per TTL, each with its own cache entry.
+ *
+ * The TTL is part of the cache key deliberately. A single shared entry cannot
+ * serve both a 60-second page and a 3600-second sitemap — whichever TTL is
+ * lower wins for everyone, which is precisely the bug described above. Paying
+ * for a second entry is what buys the homepage its one-minute freshness while
+ * letting the sitemap actually honour the hour it asks for.
+ */
+function cachedPerTtl<A extends unknown[], R>(key: string, loader: (...args: A) => Promise<R>) {
+  return (ttl: number) => unstable_cache(loader, [key, String(ttl)], { revalidate: ttl })
+}
+
+const publishedArticlesFor = cachedPerTtl(
+  'public-list-published-articles',
   async (
     options: {
       language?: string
@@ -102,9 +140,13 @@ export const listPublishedArticles = unstable_cache(
     if (!data) return emptyPage<ArticleCard>()
     return { items: data.items ?? [], nextToken: data.nextToken ?? null }
   },
-  ['public-list-published-articles'],
-  { revalidate: 60 },
 )
+
+export const listPublishedArticles = publishedArticlesFor(TTL.page)
+/** For /feed.xml and /news-sitemap.xml, which declare `revalidate = 300`. */
+export const listPublishedArticlesSlow = publishedArticlesFor(TTL.slow)
+/** For /sitemap.xml, which declares `revalidate = 3600`. */
+export const listPublishedArticlesHourly = publishedArticlesFor(TTL.sitemap)
 
 export const listArticlesByCategory = unstable_cache(
   async (
@@ -201,7 +243,8 @@ export const listPolls = unstable_cache(
   { revalidate: 60 },
 )
 
-export const listPromises = unstable_cache(
+const promisesFor = cachedPerTtl(
+  'public-list-promises',
   async (
     options: { language?: string; limit?: number; nextToken?: string } = {},
   ): Promise<Page<PublicPromise>> => {
@@ -217,18 +260,24 @@ export const listPromises = unstable_cache(
     if (!data) return emptyPage<PublicPromise>()
     return { items: data.items ?? [], nextToken: data.nextToken ?? null }
   },
-  ['public-list-promises'],
-  { revalidate: 60 },
 )
 
-export const getPromise = unstable_cache(
+export const listPromises = promisesFor(TTL.page)
+/** For /promises and /promises/[slug], which declare `revalidate = 300`. */
+export const listPromisesSlow = promisesFor(TTL.slow)
+/** For /sitemap.xml, which declares `revalidate = 3600`. */
+export const listPromisesHourly = promisesFor(TTL.sitemap)
+
+const promiseBySlugFor = cachedPerTtl(
+  'public-promise-by-slug',
   async (slug: string): Promise<PublicPromise | null> => {
     const result = await publicServerClient().queries.getPublicPromise({ slug }, PUBLIC_AUTH)
     return unwrap('getPublicPromise', result)
   },
-  ['public-promise-by-slug'],
-  { revalidate: 60 },
 )
+
+/** For /promises/[slug], which declares `revalidate = 300`. */
+export const getPromise = promiseBySlugFor(TTL.slow)
 
 export const listApprovedComments = unstable_cache(
   async (
@@ -325,19 +374,19 @@ export const getSiteSettings = unstable_cache(
  * Categories and tags are ordinary model reads: they carry no draft state and
  * no PII, so they are the one model class with a direct guest read rule.
  */
-export const listCategories = unstable_cache(
-  async () => {
-    const client = publicServerClient()
-    const result = await client.models.Category.list({
-      filter: { isActive: { eq: true } },
-      limit: 50,
-      ...PUBLIC_AUTH,
-    })
-    return unwrap('listCategories', result) ?? []
-  },
-  ['public-list-categories'],
-  { revalidate: 60 },
-)
+const categoriesFor = cachedPerTtl('public-list-categories', async () => {
+  const client = publicServerClient()
+  const result = await client.models.Category.list({
+    filter: { isActive: { eq: true } },
+    limit: 50,
+    ...PUBLIC_AUTH,
+  })
+  return unwrap('listCategories', result) ?? []
+})
+
+export const listCategories = categoriesFor(TTL.page)
+/** For /sitemap.xml, which declares `revalidate = 3600`. */
+export const listCategoriesHourly = categoriesFor(TTL.sitemap)
 
 export const getCategoryBySlug = unstable_cache(
   async (slug: string) => {

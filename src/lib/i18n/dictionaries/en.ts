@@ -8,6 +8,7 @@ import type { Dictionary } from './hi'
 export const en: Dictionary = {
   siteName: 'Raj Chowk',
   tagline: 'News, analysis and your opinion',
+  footerBlurb: 'Independent reporting, clear analysis and accountable journalism.',
 
   nav: {
     home: 'Home',
@@ -32,6 +33,10 @@ export const en: Dictionary = {
     themeLight: 'Light',
     themeDark: 'Dark',
     themeSystem: 'System',
+    editorialPolicy: 'Editorial policy',
+    correctionsPolicy: 'Corrections policy',
+    contact: 'Contact',
+    rssFeed: 'RSS feed',
   },
 
   article: {
@@ -184,6 +189,20 @@ export const en: Dictionary = {
     rateLimited: 'Too many requests. Please try again shortly.',
     validation: 'The form has {count} errors',
     goHome: 'Go to the homepage',
+    digest: 'Error code: {digest}',
+
+    invalidInput: "That information isn't valid.",
+    conflict: 'This article has already been published, or its status changed. Refresh the page.',
+    internal: 'Something went wrong on the server. Please try again shortly.',
+    alreadyVoted: 'You have already voted in this poll.',
+    pollClosed: 'This poll is not open.',
+    invalidOption: 'That option does not belong to this poll.',
+    changeLimit: 'You have changed your vote the maximum number of times.',
+    notAvailable: 'This is not available yet.',
+    depthExceeded: 'This comment cannot take any more replies.',
+    duplicate: 'That has already been submitted.',
+    commentsClosed: 'Comments are closed on this article.',
+    suspended: 'Your account is currently suspended.',
   },
 
   a11y: {

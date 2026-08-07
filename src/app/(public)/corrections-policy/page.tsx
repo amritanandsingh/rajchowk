@@ -1,12 +1,13 @@
 import type { Metadata } from 'next'
 import { PageHeader } from '@/components/site/page-header'
+import { Container } from '@/components/ui/container'
 export const metadata: Metadata = {
   title: 'सुधार नीति',
   alternates: { canonical: '/corrections-policy' },
 }
 export default function CorrectionsPolicyPage() {
   return (
-    <main id="content" className="mx-auto max-w-3xl px-4 py-10">
+    <Container width="prose">
       <PageHeader title="सुधार नीति" description="पारदर्शिता विश्वास की पहली शर्त है।" />
       <div className="space-y-5 leading-7">
         <p>
@@ -21,6 +22,6 @@ export default function CorrectionsPolicyPage() {
           संभावित गलती बताने के लिए <a href="/contact">संपर्क पृष्ठ</a> का उपयोग करें।
         </p>
       </div>
-    </main>
+    </Container>
   )
 }

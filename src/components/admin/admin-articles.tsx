@@ -9,14 +9,87 @@ import {
   firstErrorMessage,
   readableAmplifyError,
 } from '@/lib/amplify/browser-client'
+import {
+  availableActions,
+  isArticleStatus,
+  type ArticleStatus,
+  type PublishAction,
+} from '@/lib/domain/article-status'
+import { resultMessage } from '@/lib/domain/result-code'
 import { SLUG_PATTERN } from '@/lib/domain/slug'
-import { canCreateCategory, canWriteArticles } from '@/lib/domain/staff-role'
+import { canCreateCategory, canWriteArticles, isAdmin } from '@/lib/domain/staff-role'
+// The Hindi dictionary directly, not useDictionary(). /admin is Hindi-only —
+// there is no locale switcher on staff surfaces — so reading the context would
+// buy nothing and would couple every staff component to <Providers>.
+import { hi } from '@/lib/i18n/dictionaries/hi'
 import { CategoryQuickCreate } from './category-quick-create'
 import { useStaffGroups } from './use-staff-groups'
 import type { Schema } from '@/../amplify/data/resource'
 
 type Article = Schema['Article']['type']
 type Category = Schema['Category']['type']
+
+/**
+ * The editor-facing verb for each transition, and the audit trail it writes.
+ *
+ * Hardcoded Hindi rather than dictionary lookups, matching the rest of this
+ * file: /admin is Hindi-only by design, and the locale switcher is not offered
+ * on staff surfaces. Error messages DO go through the dictionary, because those
+ * strings are shared with reader-facing surfaces that are bilingual.
+ */
+const ACTION_LABELS: Record<PublishAction, string> = {
+  SUBMIT_FOR_REVIEW: 'समीक्षा के लिए भेजें',
+  RETURN_TO_DRAFT: 'ड्राफ़्ट में लौटाएँ',
+  SCHEDULE: 'शेड्यूल करें',
+  PUBLISH: 'प्रकाशित करें',
+  UNPUBLISH: 'हटाएँ',
+  ARCHIVE: 'संग्रह करें',
+  RESTORE: 'बहाल करें',
+}
+
+const ACTION_SUMMARIES: Record<PublishAction, string> = {
+  SUBMIT_FOR_REVIEW: 'डैशबोर्ड से समीक्षा हेतु भेजा गया',
+  RETURN_TO_DRAFT: 'डैशबोर्ड से ड्राफ़्ट में लौटाया गया',
+  SCHEDULE: 'डैशबोर्ड से शेड्यूल किया गया',
+  PUBLISH: 'डैशबोर्ड से प्रकाशित',
+  UNPUBLISH: 'डैशबोर्ड से हटाया गया',
+  ARCHIVE: 'डैशबोर्ड से संग्रहित',
+  RESTORE: 'डैशबोर्ड से बहाल किया गया',
+}
+
+/** The destructive-looking transitions get the outline treatment, not primary. */
+const OUTLINE_ACTIONS: readonly PublishAction[] = ['UNPUBLISH', 'RETURN_TO_DRAFT', 'ARCHIVE']
+
+const STATUS_LABELS: Record<ArticleStatus, string> = {
+  DRAFT: 'ड्राफ़्ट',
+  IN_REVIEW: 'समीक्षा में',
+  SCHEDULED: 'शेड्यूल्ड',
+  PUBLISHED: 'प्रकाशित',
+  UNPUBLISHED: 'हटाया गया',
+  ARCHIVED: 'संग्रहित',
+}
+
+/** Tone per status, from the existing status tokens — never a raw colour. */
+const STATUS_TONES: Record<ArticleStatus, string> = {
+  DRAFT: 'bg-bg-subtle text-fg-muted',
+  IN_REVIEW: 'bg-warning-subtle text-warning',
+  SCHEDULED: 'bg-info-subtle text-info',
+  PUBLISHED: 'bg-success-subtle text-success',
+  UNPUBLISHED: 'bg-danger-subtle text-danger',
+  ARCHIVED: 'bg-bg-subtle text-fg-subtle',
+}
+
+/**
+ * An article with no `status` attribute is a DRAFT.
+ *
+ * The field is Lambda-owned, so a freshly created article genuinely has no
+ * status until the first transition writes one. The publish handler makes the
+ * same inference; see the ConditionExpression note in
+ * amplify/functions/publish-article/handler.ts.
+ */
+function statusOf(article: Article): ArticleStatus {
+  return isArticleStatus(article.status) ? article.status : 'DRAFT'
+}
 
 /**
  * Active categories, in the order an editor expects them.
@@ -49,6 +122,7 @@ export function AdminArticles() {
   const { groups, ready } = useStaffGroups()
   const mayWrite = canWriteArticles(groups)
   const mayAddCategory = canCreateCategory(groups)
+  const admin = isAdmin(groups)
 
   async function load() {
     setLoading(true)
@@ -123,19 +197,54 @@ export function AdminArticles() {
       setSaving(false)
     }
   }
-  async function publish(articleId: string, action: 'PUBLISH' | 'UNPUBLISH') {
+  /**
+   * Run one transition from the state machine.
+   *
+   * Takes the full `PublishAction` union rather than just PUBLISH/UNPUBLISH.
+   * Those two are `adminOnly` in the transition table, so restricting this
+   * function to them left an editor with no reachable action at all: the whole
+   * justification for the mutation being `allow.groups(STAFF)` is that editors
+   * legitimately call SUBMIT_FOR_REVIEW and RETURN_TO_DRAFT, and neither had a
+   * button. Which action is offered is decided by `availableActions` below, so
+   * this function never has to know the rules twice.
+   */
+  async function runAction(articleId: string, action: PublishAction) {
     setSaving(true)
     setError('')
     try {
       const response = await adminDataClient.mutations.publishArticle({
         articleId,
         action,
-        changeSummary: action === 'PUBLISH' ? 'डैशबोर्ड से प्रकाशित' : 'डैशबोर्ड से हटाया गया',
+        changeSummary: ACTION_SUMMARIES[action],
       })
       const failure = firstErrorMessage(response.errors)
       if (failure) throw new Error(failure)
-      if (!response.data?.ok) throw new Error(response.data?.message ?? 'कार्य पूरा नहीं हुआ')
-      await load()
+      const result = response.data
+      if (!result?.ok) {
+        // The CODE, not the Lambda's generic `message`. A CONFLICT here means
+        // "someone else moved this article", which needs a refresh — not the
+        // "try again" that the fallback text used to suggest for a failure that
+        // retrying could never fix.
+        throw new Error(resultMessage(hi, result?.code, result?.message))
+      }
+      // Patch the one row that changed, from the mutation's own response.
+      // Calling load() here refetched 100 articles and 200 categories to
+      // reflect a single status flip, and set `loading`, which unmounts the
+      // whole table on every publish.
+      setArticles((current) =>
+        current.map((item) =>
+          item.id === articleId
+            ? {
+                ...item,
+                // `?? null` rather than leaving the value possibly undefined:
+                // exactOptionalPropertyTypes distinguishes "absent" from
+                // "null", and Amplify's model type allows only the latter.
+                status: isArticleStatus(result.status) ? result.status : (item.status ?? null),
+                revisionCount: result.revisionNumber ?? item.revisionCount ?? null,
+              }
+            : item,
+        ),
+      )
     } catch (caught) {
       setError(readableAmplifyError(caught))
     } finally {
@@ -144,7 +253,29 @@ export function AdminArticles() {
   }
   // `ready` is part of the gate so the role-dependent UI below never renders
   // from an empty group list and flashes a false "not allowed" at an editor.
-  if (loading || !ready) return <p role="status">लेख लोड हो रहे हैं…</p>
+  //
+  // A table-shaped skeleton rather than a line of text: a one-line status
+  // collapsed the page to nothing and then reflowed the whole layout when the
+  // rows arrived, which is most of why this screen felt slow.
+  if (loading || !ready)
+    return (
+      <div aria-busy="true" role="status" aria-label="लेख लोड हो रहे हैं">
+        <div className="mb-5 flex justify-end">
+          <div className="h-11 w-28 animate-pulse rounded-md bg-bg-subtle" />
+        </div>
+        <div className="overflow-hidden rounded-card border border-border">
+          <div className="h-11 bg-bg-subtle" />
+          {Array.from({ length: 5 }, (_, index) => (
+            <div key={index} className="flex items-center gap-4 border-t border-border p-3">
+              <div className="h-4 flex-1 animate-pulse rounded bg-bg-subtle" />
+              <div className="h-4 w-16 animate-pulse rounded bg-bg-subtle" />
+              <div className="h-6 w-20 animate-pulse rounded-full bg-bg-subtle" />
+              <div className="h-8 w-24 animate-pulse rounded-md bg-bg-subtle" />
+            </div>
+          ))}
+        </div>
+      </div>
+    )
   return (
     <div>
       {mayWrite ? (
@@ -262,39 +393,47 @@ export function AdminArticles() {
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {articles.map((article) => (
-              <tr key={article.id}>
-                <td className="p-3 font-semibold">{article.title}</td>
-                <td className="p-3">{article.contentType}</td>
-                <td className="p-3">{article.status ?? 'DRAFT'}</td>
-                <td className="p-3">
-                  {/* publishArticle is allow.groups(STAFF), so a MODERATOR
-                      cannot call it at all. */}
-                  {!mayWrite ? (
-                    <span aria-hidden="true">—</span>
-                  ) : article.status === 'PUBLISHED' ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      loading={saving}
-                      onClick={() => publish(article.id, 'UNPUBLISH')}
+            {articles.map((article) => {
+              const status = statusOf(article)
+              // The transition table is the single source of truth for what is
+              // offered, so an admin and an editor each see exactly the actions
+              // the handler will accept from them — and adding a transition
+              // there gives it a button here for free.
+              const actions = availableActions(status, admin)
+              return (
+                <tr key={article.id} className="transition-colors hover:bg-bg-subtle">
+                  <td className="p-3 font-semibold">{article.title}</td>
+                  <td className="p-3">{article.contentType}</td>
+                  <td className="p-3">
+                    <span
+                      className={`inline-block rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_TONES[status]}`}
                     >
-                      हटाएँ
-                    </Button>
-                  ) : (
-                    <Button
-                      type="button"
-                      size="sm"
-                      loading={saving}
-                      onClick={() => publish(article.id, 'PUBLISH')}
-                    >
-                      प्रकाशित करें
-                    </Button>
-                  )}
-                </td>
-              </tr>
-            ))}
+                      {STATUS_LABELS[status]}
+                    </span>
+                  </td>
+                  <td className="p-3">
+                    {actions.length === 0 ? (
+                      <span className="text-xs text-fg-muted">कोई कार्य उपलब्ध नहीं</span>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {actions.map((action) => (
+                          <Button
+                            key={action}
+                            type="button"
+                            size="sm"
+                            variant={OUTLINE_ACTIONS.includes(action) ? 'outline' : 'primary'}
+                            loading={saving}
+                            onClick={() => runAction(article.id, action)}
+                          >
+                            {ACTION_LABELS[action]}
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>

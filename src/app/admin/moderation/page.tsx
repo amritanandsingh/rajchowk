@@ -1,10 +1,11 @@
 import { ModerationQueue } from '@/components/admin/moderation-queue'
 import { PageHeader } from '@/components/site/page-header'
+import { Container } from '@/components/ui/container'
 export default function ModerationPage() {
   return (
-    <main id="content" className="mx-auto max-w-4xl px-4 py-10">
+    <Container width="prose">
       <PageHeader title="मॉडरेशन कतार" />
       <ModerationQueue />
-    </main>
+    </Container>
   )
 }

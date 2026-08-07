@@ -1,4 +1,4 @@
-import { Inter, Noto_Sans_Devanagari, Noto_Serif_Devanagari } from 'next/font/google'
+import { Noto_Sans_Devanagari, Noto_Serif_Devanagari } from 'next/font/google'
 
 /**
  * Font strategy for a Hindi-primary, code-mixed newsroom.
@@ -11,6 +11,13 @@ import { Inter, Noto_Sans_Devanagari, Noto_Serif_Devanagari } from 'next/font/go
  *    single static instance and costs the weight range.
  *  - The `devanagari` subset is substantially larger than `latin`, so only the
  *    primary body face is preloaded.
+ *
+ * Inter was here for "numerals, dates and English content" via `--font-sans`,
+ * but `font-sans` was never applied to a single element: `body` is pinned to
+ * `--font-hindi`, and the Devanagari faces already carry a Latin subset for
+ * code-mixed headlines. It was a font download that nothing ever rendered in,
+ * so it is gone. If a Latin-only face is wanted later, add it AND apply it —
+ * an unused `@theme` token is invisible dead weight.
  */
 
 /** Primary body + UI face. Hindi headlines are routinely code-mixed
@@ -31,16 +38,4 @@ export const notoSerifDevanagari = Noto_Serif_Devanagari({
   preload: false,
 })
 
-/** Latin-only face for numerals, dates, and English content. */
-export const inter = Inter({
-  subsets: ['latin'],
-  display: 'swap',
-  variable: '--font-inter',
-  preload: false,
-})
-
-export const fontVariables = [
-  notoSansDevanagari.variable,
-  notoSerifDevanagari.variable,
-  inter.variable,
-].join(' ')
+export const fontVariables = [notoSansDevanagari.variable, notoSerifDevanagari.variable].join(' ')

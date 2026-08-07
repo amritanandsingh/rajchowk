@@ -1,10 +1,11 @@
 'use client'
 
 import Link from 'next/link'
-import { fetchAuthSession } from 'aws-amplify/auth'
 import { FileText, MessageSquareWarning, Radio, Vote } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import { readableAmplifyError } from '@/lib/amplify/browser-client'
+import { isStaff } from '@/lib/domain/staff-role'
+import { cardVariants } from '@/components/ui/card'
+import { cn } from '@/lib/utils/cn'
+import { useStaffGroups } from './use-staff-groups'
 
 const cards = [
   {
@@ -24,31 +25,18 @@ const cards = [
 ]
 
 export function AdminDashboard() {
-  const [state, setState] = useState<'loading' | 'allowed' | 'denied'>('loading')
-  const [message, setMessage] = useState('')
-  useEffect(() => {
-    void (async () => {
-      try {
-        const session = await fetchAuthSession()
-        const raw = session.tokens?.idToken?.payload['cognito:groups']
-        const groups = Array.isArray(raw) ? raw.map(String) : []
-        setState(
-          groups.some((group) => ['ADMIN', 'EDITOR', 'MODERATOR'].includes(group))
-            ? 'allowed'
-            : 'denied',
-        )
-      } catch (error) {
-        setState('denied')
-        setMessage(readableAmplifyError(error))
-      }
-    })()
-  }, [])
-  if (state === 'loading') return <p role="status">अनुमति जाँची जा रही है…</p>
-  if (state === 'denied')
+  // Was a second, independent fetchAuthSession() alongside the one in
+  // useStaffGroups — the same token decoded twice on the same page. The hook
+  // now shares one promise across every staff component, and `isStaff` keeps
+  // the group list from being spelled out a second time here.
+  const { groups, ready } = useStaffGroups()
+
+  if (!ready) return <p role="status">अनुमति जाँची जा रही है…</p>
+  if (!isStaff(groups))
     return (
       <div className="rounded-card bg-danger-subtle p-5 text-danger" role="alert">
-        <h2 className="font-bold">प्रवेश निषिद्ध</h2>
-        <p className="mt-2 text-sm">{message || 'यह क्षेत्र केवल अधिकृत स्टाफ के लिए है।'}</p>
+        <h2 className="font-display text-xl font-bold">प्रवेश निषिद्ध</h2>
+        <p className="mt-2 text-sm">यह क्षेत्र केवल अधिकृत स्टाफ के लिए है।</p>
       </div>
     )
   return (
@@ -57,7 +45,10 @@ export function AdminDashboard() {
         <Link
           key={href}
           href={href}
-          className="group rounded-card border border-border bg-surface p-5 text-fg no-underline shadow-card hover:border-brand"
+          className={cn(
+            cardVariants({ variant: 'surface', padding: 'md' }),
+            'group text-fg no-underline transition-colors hover:border-brand motion-reduce:transition-none',
+          )}
         >
           <Icon aria-hidden="true" className="size-7 text-brand" />
           <h2 className="mt-4 text-xl font-bold group-hover:text-brand">{title}</h2>

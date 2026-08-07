@@ -5,6 +5,7 @@ import { PageHeader } from '@/components/site/page-header'
 import { listPolls } from '@/lib/amplify/queries'
 import { formatDate, interpolate } from '@/lib/format'
 import { getDictionary } from '@/lib/i18n'
+import { Container } from '@/components/ui/container'
 
 export const revalidate = 60
 export const metadata: Metadata = { title: 'जनमत', alternates: { canonical: '/janmat' } }
@@ -17,7 +18,7 @@ export default async function JanmatPage() {
   ])
   const polls = [...open, ...closed]
   return (
-    <main id="content" tabIndex={-1} className="mx-auto max-w-5xl px-4 py-8 sm:py-10">
+    <Container>
       <PageHeader
         title={dict.poll.title}
         description="समसामयिक मुद्दों पर अपनी राय दर्ज करें और पारदर्शी नतीजे देखें।"
@@ -53,6 +54,6 @@ export default async function JanmatPage() {
       ) : (
         <EmptyState title="अभी कोई जनमत उपलब्ध नहीं है" />
       )}
-    </main>
+    </Container>
   )
 }

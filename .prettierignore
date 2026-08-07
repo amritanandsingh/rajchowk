@@ -1,6 +1,9 @@
 node_modules
 .next
 .amplify
+# Local editor/agent tooling state, not project source. Untracked, and its
+# formatting is owned by the tool that writes it.
+.claude
 out
 build
 coverage
