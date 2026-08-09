@@ -35,8 +35,8 @@ const mocks = vi.hoisted(() => ({
 // `firstErrorMessage` is re-implemented rather than imported through
 // `importOriginal`, which would run that configure call.
 vi.mock('@/lib/amplify/browser-client', () => ({
-  browserDataClient: {},
-  adminDataClient: {
+  guestDataClient: {},
+  userPoolDataClient: {
     models: {
       Article: { list: mocks.listArticles, create: mocks.createArticle },
       Category: {
@@ -266,6 +266,64 @@ describe('saving the article', () => {
     // clear React state, so the component has to do it explicitly.
     await userEvent.click(await screen.findByRole('button', { name: 'नया लेख' }))
     expect(categorySelect()).toHaveValue('')
+  })
+
+  it('shows the saved article without refetching the list', async () => {
+    // The reported "saving a long article does nothing" bug, pinned.
+    //
+    // create() used to end with load(), which Scans the base table. DynamoDB
+    // caps a Scan page at 1 MB and publishing adds bodyPlain to every row, so a
+    // newsroom of long Devanagari articles returns only a fraction of the
+    // requested 100 — and a truncated page carries no `errors`, so nothing
+    // reported it. The article was written and then simply absent from the list.
+    //
+    // Simulated here the only way it can be from the client's side: the refetch
+    // comes back WITHOUT the new row. The row must still appear, because it is
+    // patched in from the create response rather than re-read.
+    mocks.listCategories.mockResolvedValue({
+      data: [category('c-politics', 'राजनीति', 10)],
+      errors: undefined,
+    })
+    mocks.listArticles.mockResolvedValue({
+      data: [{ id: 'old-1', title: 'पुराना लेख', contentType: 'NEWS', status: 'PUBLISHED' }],
+      errors: undefined,
+    })
+
+    await openForm()
+    await userEvent.type(screen.getByLabelText('शीर्षक'), 'बजट पर बहस')
+    await userEvent.type(screen.getByLabelText('URL स्लग'), 'budget-par-bahas')
+    await userEvent.type(screen.getByLabelText('सारांश'), 'सारांश यहाँ।')
+    await userEvent.type(screen.getByLabelText('लेख (Markdown)'), 'पहला पैराग्राफ।')
+    await userEvent.selectOptions(categorySelect(), 'c-politics')
+
+    const listCallsBefore = mocks.listArticles.mock.calls.length
+    await userEvent.click(screen.getByRole('button', { name: 'ड्राफ़्ट सहेजें' }))
+
+    // Present despite the list mock never returning it.
+    expect(await screen.findByText('बजट पर बहस')).toBeInTheDocument()
+    // The pre-existing row survives; this prepends rather than replacing.
+    expect(screen.getByText('पुराना लेख')).toBeInTheDocument()
+    // And no refetch was triggered, so a truncated page cannot hide the article.
+    expect(mocks.listArticles.mock.calls.length).toBe(listCallsBefore)
+    // No status attribute yet — a fresh draft is Lambda-unowned until the first
+    // transition, and statusOf() must read that absence as DRAFT.
+    expect(screen.getAllByText('ड्राफ़्ट').length).toBeGreaterThan(0)
+  })
+
+  it('warns that the article list is incomplete when the page is truncated', async () => {
+    // A truncated Scan is not an error, so firstErrorMessage cannot see it. If
+    // nextToken is ignored the UI silently claims to show the whole newsroom.
+    mocks.listArticles.mockResolvedValue({
+      data: [{ id: 'art-1', title: 'पहला लेख', contentType: 'NEWS', status: 'DRAFT' }],
+      errors: undefined,
+      nextToken: 'more-rows-exist',
+    })
+
+    render(<AdminArticles />)
+
+    expect(await screen.findByText('पहला लेख')).toBeInTheDocument()
+    const notices = screen.getAllByRole('status').map((node) => node.textContent ?? '')
+    expect(notices.some((text) => text.includes('सूची अपूर्ण है'))).toBe(true)
   })
 })
 

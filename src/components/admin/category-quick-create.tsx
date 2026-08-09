@@ -4,7 +4,7 @@ import { useState, type KeyboardEvent } from 'react'
 import { FormField, TextArea, TextInput } from '@/components/forms/form-field'
 import { Button } from '@/components/ui/button'
 import {
-  adminDataClient,
+  userPoolDataClient,
   firstErrorMessage,
   readableAmplifyError,
 } from '@/lib/amplify/browser-client'
@@ -75,7 +75,7 @@ export function CategoryQuickCreate({ onCreated }: { onCreated: (category: Categ
       // A duplicate slug would collide on /category/<slug>. This is a UX guard,
       // not a constraint — `slug` is a GSI key, not a unique key — but it
       // catches the realistic case of two editors adding the same topic.
-      const existing = await adminDataClient.models.Category.categoryBySlug(
+      const existing = await userPoolDataClient.models.Category.categoryBySlug(
         { slug: finalSlug },
         { limit: 1 },
       )
@@ -85,7 +85,7 @@ export function CategoryQuickCreate({ onCreated }: { onCreated: (category: Categ
         setError('यह स्लग पहले से मौजूद है। दूसरा स्लग चुनें।')
         return
       }
-      const created = await adminDataClient.models.Category.create({
+      const created = await userPoolDataClient.models.Category.create({
         slug: finalSlug,
         nameHi: hi,
         nameEn: en,

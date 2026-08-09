@@ -1,0 +1,103 @@
+# Pre-merge quality gate.
+#
+# Why this exists separately from amplify.yml
+# -------------------------------------------
+# amplify.yml runs format/lint/typecheck/test/build in its FRONTEND phase, which
+# executes only AFTER the backend phase has already run `ampx pipeline-deploy`
+# and mutated real AWS resources. A failing test there cannot prevent a bad
+# backend change from landing — it can only tell you afterwards. This workflow
+# runs the identical commands on a pull request, before anything touches AWS.
+#
+# It must stay command-for-command in sync with amplify.yml's frontend build
+# phase, otherwise a green PR stops predicting a green deploy. The local
+# equivalent is `npm run verify:ci`.
+#
+# No AWS credentials are configured here, deliberately. `npm run ci:outputs`
+# writes the committed placeholder amplify_outputs.json (endpoints pointed at
+# 127.0.0.1:1) so the whole ladder runs with no cloud account at all. Tests that
+# genuinely need AWS — test:integration, verify:backend — stay out of CI and are
+# run by hand against a sandbox before merging.
+name: CI
+
+on:
+  pull_request:
+    branches: [main, '2.0.0']
+  push:
+    branches: ['2.0.0']
+  workflow_dispatch:
+
+# A new push to the same PR makes the in-flight run obsolete.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Lint, typecheck, test, build, e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # node-version-file, never a bare major: package.json pins engines.node to
+      # an exact patch and .npmrc sets engine-strict, so any other 22.x fails
+      # `npm ci` with EBADENGINE before installing anything.
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Print toolchain
+        run: node -v && npm -v
+
+      # --include=dev because NODE_ENV=production in a CI image would skip
+      # devDependencies and break the build (no typescript).
+      # --include=optional because @tailwindcss/oxide and @next/swc are
+      # platform-specific optional deps.
+      - name: Install
+        run: npm ci --include=dev --include=optional
+
+      # amplify_outputs.json is gitignored and is a static import in
+      # src/lib/media.ts, src/lib/amplify/config.ts and browser-client.ts, so
+      # webpack cannot resolve them without this and `next build` fails with
+      # "Module not found" before compiling a single page.
+      - name: Write placeholder Amplify outputs
+        run: npm run ci:outputs
+
+      - name: Format
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck:all
+
+      - name: Unit and component tests
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Playwright browsers
+        run: npm run e2e:install
+
+      # CI=1 is set by GitHub, which flips playwright.config.ts to
+      # `npm run build && npm run start`. This is the only place e2e runs
+      # against a production build with the strict CSP — `next dev` adds
+      # 'unsafe-eval' to script-src, so a dev-only run cannot catch a CSP
+      # regression.
+      - name: End-to-end tests
+        run: npm run e2e:mocked
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

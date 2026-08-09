@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { readableAmplifyError } from '@/lib/amplify/browser-client'
+import { ensureUserProfile } from '@/lib/amplify/ensure-profile'
 
 type Profile = { username: string; email?: string; displayName?: string; groups: string[] }
 export function AccountPanel() {
@@ -27,6 +28,13 @@ export function AccountPanel() {
           ...(attrs.preferred_username ? { displayName: attrs.preferred_username } : {}),
           groups: Array.isArray(groups) ? groups.map(String) : [],
         })
+        // Safety net. Sign-in is the primary place a UserProfile gets created,
+        // but anyone already holding a live session when this shipped never went
+        // through it, and without a profile row submitQuestion/submitComment
+        // return FORBIDDEN. Idempotent, so this costs one no-op call per visit.
+        // Intentionally not surfaced: the panel's own data loaded fine, and the
+        // member will get a specific error at the point of use if it did fail.
+        void ensureUserProfile()
       } catch {
         router.replace('/auth/sign-in?next=/account')
       } finally {

@@ -4,7 +4,7 @@ import { ThumbsUp } from 'lucide-react'
 import { useState } from 'react'
 import { useAnnounce, useDictionary } from '@/components/providers'
 import { Button } from '@/components/ui/button'
-import { browserDataClient, readableAmplifyError } from '@/lib/amplify/browser-client'
+import { userPoolDataClient, readableAmplifyError } from '@/lib/amplify/browser-client'
 
 export function QuestionUpvote({
   questionId,
@@ -23,7 +23,7 @@ export function QuestionUpvote({
     setLoading(true)
     const desired = !upvoted
     try {
-      const response = await browserDataClient.mutations.toggleQuestionUpvote({
+      const response = await userPoolDataClient.mutations.toggleQuestionUpvote({
         questionId,
         upvoted: desired,
       })

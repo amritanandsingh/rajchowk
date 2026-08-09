@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from 'react'
 import { useAnnounce, useDictionary, useLocale } from '@/components/providers'
 import { Button } from '@/components/ui/button'
-import { browserDataClient, readableAmplifyError } from '@/lib/amplify/browser-client'
+import { guestDataClient, readableAmplifyError } from '@/lib/amplify/browser-client'
 import { FormField, TextInput } from './form-field'
 
 export function NewsletterForm({ source = 'WEBSITE' }: { source?: string }) {
@@ -21,7 +21,7 @@ export function NewsletterForm({ source = 'WEBSITE' }: { source?: string }) {
     setLoading(true)
     setMessage('')
     try {
-      const result = await browserDataClient.mutations.newsletterSubscribe({
+      const result = await guestDataClient.mutations.newsletterSubscribe({
         email,
         language: locale.toUpperCase(),
         source,

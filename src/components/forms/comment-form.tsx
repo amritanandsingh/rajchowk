@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useState, type FormEvent } from 'react'
 import { useAnnounce, useDictionary } from '@/components/providers'
 import { Button } from '@/components/ui/button'
-import { browserDataClient, readableAmplifyError } from '@/lib/amplify/browser-client'
+import { userPoolDataClient, readableAmplifyError } from '@/lib/amplify/browser-client'
 import { TextArea } from './form-field'
 
 export function CommentForm({ articleId }: { articleId: string }) {
@@ -19,7 +19,7 @@ export function CommentForm({ articleId }: { articleId: string }) {
     if (content.length < 2) return
     setLoading(true)
     try {
-      const response = await browserDataClient.mutations.submitComment({ articleId, content })
+      const response = await userPoolDataClient.mutations.submitComment({ articleId, content })
       if (response.errors?.length) throw new Error(response.errors[0]?.message)
       const next = response.data?.ok
         ? dict.comments.submitted

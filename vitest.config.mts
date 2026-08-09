@@ -60,12 +60,9 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],
-      include: [
-        'src/lib/**',
-        'src/components/**',
-        'src/features/**',
-        'amplify/functions/shared/**',
-      ],
+      // `src/features/**` was listed here but has never existed; a non-matching
+      // glob silently contributes nothing, which flatters the percentage.
+      include: ['src/lib/**', 'src/components/**', 'amplify/functions/shared/**'],
       exclude: ['**/*.test.*', '**/*.d.ts'],
     },
   },

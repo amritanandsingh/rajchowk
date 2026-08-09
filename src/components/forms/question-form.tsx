@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useState, type FormEvent } from 'react'
 import { useAnnounce, useDictionary, useLocale } from '@/components/providers'
 import { Button } from '@/components/ui/button'
-import { browserDataClient, readableAmplifyError } from '@/lib/amplify/browser-client'
+import { userPoolDataClient, readableAmplifyError } from '@/lib/amplify/browser-client'
 import { FormField, TextArea, TextInput } from './form-field'
 
 export function QuestionForm() {
@@ -25,7 +25,7 @@ export function QuestionForm() {
     }
     setLoading(true)
     try {
-      const response = await browserDataClient.mutations.submitQuestion({
+      const response = await userPoolDataClient.mutations.submitQuestion({
         questionText,
         category: String(form.get('category') ?? '').trim() || null,
       })

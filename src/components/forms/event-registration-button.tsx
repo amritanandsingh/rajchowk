@@ -5,7 +5,7 @@ import { getCurrentUser } from 'aws-amplify/auth'
 import { useState } from 'react'
 import { useAnnounce, useDictionary } from '@/components/providers'
 import { Button } from '@/components/ui/button'
-import { browserDataClient, readableAmplifyError } from '@/lib/amplify/browser-client'
+import { userPoolDataClient, readableAmplifyError } from '@/lib/amplify/browser-client'
 
 export function EventRegistrationButton({ eventId }: { eventId: string }) {
   const dict = useDictionary()
@@ -24,7 +24,7 @@ export function EventRegistrationButton({ eventId }: { eventId: string }) {
         setNeedsAuth(true)
         return
       }
-      const response = await browserDataClient.models.EventRegistration.create({
+      const response = await userPoolDataClient.models.EventRegistration.create({
         userSub: user.userId,
         eventId,
         registeredAt: new Date().toISOString(),

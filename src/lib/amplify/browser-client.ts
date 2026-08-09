@@ -16,35 +16,59 @@ export function configureBrowserAmplify(): void {
 configureBrowserAmplify()
 
 /**
- * Client for GUEST-REACHABLE operations.
+ * WHICH CLIENT DO I USE? Read the operation's authorization rules, not its audience.
  *
- * `identityPool` is the schema default (see `defaultAuthorizationMode` in
- * amplify/data/resource.ts); it is stated explicitly here so that the split
- * below reads as a decision rather than an omission.
+ *   Does the rule list literally contain `allow.guest()`?
+ *     YES -> guestDataClient
+ *     NO  -> userPoolDataClient
  *
- * Only the operations that actually declare `allow.guest()` belong on this
- * client — `newsletterSubscribe`, `newsletterVerify`, `newsletterUnsubscribe`
- * and `searchContent`. Those three-rule authorizations (`allow.guest()`,
- * `allow.authenticated('identityPool')`, `allow.authenticated()`) are the tell.
+ * That is the whole rule, and it is decided by the SCHEMA, never by whether the
+ * feature feels public. `allow.authenticated()`, `allow.group(...)` and
+ * `allow.owner*(...)` ALL resolve to the Cognito user pool. A request signed
+ * SigV4 through the identity pool carries no user-pool token, matches no such
+ * rule, and AppSync answers `Unauthorized` before any resolver or Lambda runs.
+ *
+ * These two clients were previously named `browserDataClient` / `adminDataClient`,
+ * which framed the choice as public-vs-staff. That framing is wrong and it caused
+ * the same bug twice: first on /admin/articles (fixed in ce29d4a — an empty
+ * category dropdown and an "Unauthorized" article table), then on five
+ * MEMBER-FACING forms — castVote, submitComment, submitQuestion,
+ * toggleQuestionUpvote and EventRegistration.create — which are not staff
+ * operations at all, so `adminDataClient` looked like the wrong tool, yet every
+ * one of them is `allow.authenticated()` and therefore user-pool-only. The
+ * result was that no signed-in member could vote, comment, ask a question,
+ * upvote or register for an event. The names now describe the AUTH PROVIDER,
+ * which is the thing that actually has to match.
  */
-export const browserDataClient = generateClient<Schema>({ authMode: 'identityPool' })
 
 /**
- * Client for SIGNED-IN STAFF operations, and the only one that works for them.
+ * Identity-pool (SigV4) client, for operations reachable WITHOUT signing in.
  *
- * This exists because of a single, easily-missed default: `allow.authenticated()`
- * and `allow.group(...)` both resolve to the Cognito USER POOL provider, never the
- * identity pool. Category, Article, `publishArticle` and `moderateContent` are
- * authorized exclusively through those rules, so a SigV4/identityPool request —
- * which carries no user-pool token at all — matches no rule and AppSync answers
- * `Unauthorized`. That was the bug behind an empty category dropdown and an
- * "Unauthorized" article table on /admin/articles: not a missing permission, a
- * request signed the wrong way.
+ * `identityPool` is also the schema default (`defaultAuthorizationMode` in
+ * amplify/data/resource.ts); it is stated explicitly so this reads as a decision
+ * rather than an omission.
+ *
+ * Correct here only for the four operations that declare `allow.guest()`:
+ * `newsletterSubscribe`, `newsletterVerify`, `newsletterUnsubscribe` and
+ * `searchContent`. Their three-rule authorization — `allow.guest()`,
+ * `allow.authenticated('identityPool')`, `allow.authenticated()` — is the tell,
+ * and the second rule is what lets a signed-in user keep using this client.
+ */
+export const guestDataClient = generateClient<Schema>({ authMode: 'identityPool' })
+
+/**
+ * Cognito user-pool client, for every operation that requires a signed-in user —
+ * MEMBER as well as staff.
+ *
+ * Required by `allow.authenticated()` (castVote, submitComment, submitQuestion,
+ * submitReport, toggleQuestionUpvote, ensureUserProfile),
+ * `allow.owner*(...)` (EventRegistration) and `allow.group(...)` (Category,
+ * Article, publishArticle, moderateContent) alike.
  *
  * `scripts/verify-backend.ts` exercises this exact authMode against the deployed
- * API, which is why it can create a Category while the browser could not.
+ * API, which is why it could create a Category while the browser could not.
  */
-export const adminDataClient = generateClient<Schema>({ authMode: 'userPool' })
+export const userPoolDataClient = generateClient<Schema>({ authMode: 'userPool' })
 
 /**
  * First GraphQL error message, or null.

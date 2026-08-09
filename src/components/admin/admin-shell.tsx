@@ -9,6 +9,7 @@ import {
   MessageSquareWarning,
   MonitorSmartphone,
   Moon,
+  RefreshCw,
   Sun,
 } from 'lucide-react'
 import type { ReactNode } from 'react'
@@ -18,6 +19,7 @@ import { SkipLink } from '@/components/ui/skip-link'
 import type { ThemePreference } from '@/components/theme-script'
 import { useTheme } from '@/components/use-theme'
 import { cn } from '@/lib/utils/cn'
+import { useStaffGroups } from './use-staff-groups'
 
 /**
  * Chrome for the staff surfaces.
@@ -52,6 +54,7 @@ const THEME_LABEL: Record<ThemePreference, string> = {
 export function AdminShell({ children }: { children: ReactNode }) {
   const pathname = usePathname()
   const { preference, mounted, cycle } = useTheme()
+  const { refreshing, refresh } = useStaffGroups()
 
   return (
     <div className="min-h-dvh bg-bg-subtle">
@@ -92,6 +95,26 @@ export function AdminShell({ children }: { children: ReactNode }) {
           </nav>
 
           <div className="ms-auto flex items-center gap-1">
+            {/*
+              Cognito bakes `cognito:groups` into the ID token at sign-in, so a
+              role granted mid-session is invisible until a new token is minted.
+              Without this the only remedy was signing out and back in, and
+              nothing on screen said so — a genuine ADMIN simply saw no publish
+              button. This forces a fresh token and re-reads the claim.
+            */}
+            <button
+              type="button"
+              onClick={() => void refresh()}
+              disabled={refreshing}
+              title="भूमिका ताज़ा करें — नई भूमिका मिलने के बाद उपयोग करें"
+              aria-label="भूमिका ताज़ा करें"
+              className={buttonVariants({ variant: 'ghost', size: 'icon' })}
+            >
+              <RefreshCw
+                aria-hidden="true"
+                className={cn('size-5', refreshing && 'animate-spin motion-reduce:animate-none')}
+              />
+            </button>
             <button
               type="button"
               onClick={cycle}

@@ -5,7 +5,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { FormField, TextArea, TextInput } from '@/components/forms/form-field'
 import {
-  adminDataClient,
+  userPoolDataClient,
   firstErrorMessage,
   readableAmplifyError,
 } from '@/lib/amplify/browser-client'
@@ -28,6 +28,24 @@ import type { Schema } from '@/../amplify/data/resource'
 
 type Article = Schema['Article']['type']
 type Category = Schema['Category']['type']
+
+/**
+ * The only Article fields this table needs.
+ *
+ * Without an explicit selection set Amplify requests EVERY scalar, which here
+ * means `bodyMarkdown`, `bodyPlain`, `analysisMarkdown`, `conclusionMarkdown`,
+ * `keyFacts`, `factualSummary` — plus `internalNotes` and `sourceContactNotes`,
+ * which are editor-only fields with no business reaching a list view. For a
+ * newsroom with long Devanagari articles that is megabytes of markdown fetched
+ * and held in browser memory to render four columns.
+ *
+ * Note what this does NOT fix: DynamoDB reads whole items and Amplify's
+ * generated resolver sets no ProjectionExpression, so the 1 MB Scan page cap
+ * still applies to the untrimmed rows. That is what `truncated` below is for.
+ */
+const ARTICLE_LIST_FIELDS = ['id', 'title', 'contentType', 'status', 'revisionCount'] as const
+
+type ArticleRow = Pick<Article, (typeof ARTICLE_LIST_FIELDS)[number]>
 
 /**
  * The editor-facing verb for each transition, and the audit trail it writes.
@@ -87,7 +105,7 @@ const STATUS_TONES: Record<ArticleStatus, string> = {
  * same inference; see the ConditionExpression note in
  * amplify/functions/publish-article/handler.ts.
  */
-function statusOf(article: Article): ArticleStatus {
+function statusOf(article: Pick<Article, 'status'>): ArticleStatus {
   return isArticleStatus(article.status) ? article.status : 'DRAFT'
 }
 
@@ -109,8 +127,10 @@ function sortCategories(items: Category[]): Category[] {
 }
 
 export function AdminArticles() {
-  const [articles, setArticles] = useState<Article[]>([])
+  const [articles, setArticles] = useState<ArticleRow[]>([])
   const [categories, setCategories] = useState<Category[]>([])
+  // True when DynamoDB returned a partial page. See the note in load().
+  const [truncated, setTruncated] = useState(false)
   // The one controlled field in this form, so that a category created inline can
   // be selected the moment it exists.
   const [categoryId, setCategoryId] = useState('')
@@ -128,8 +148,8 @@ export function AdminArticles() {
     setLoading(true)
     try {
       const [articleResult, categoryResult] = await Promise.all([
-        adminDataClient.models.Article.list({ limit: 100 }),
-        adminDataClient.models.Category.list({ limit: 200 }),
+        userPoolDataClient.models.Article.list({ limit: 100, selectionSet: ARTICLE_LIST_FIELDS }),
+        userPoolDataClient.models.Category.list({ limit: 200 }),
       ])
       // Two independent error channels, on purpose. A category failure must not
       // blank the article table and vice versa — and the original bug was that
@@ -141,6 +161,11 @@ export function AdminArticles() {
       } else {
         setError('')
         setArticles(articleResult.data)
+        // A truncated page is NOT an error: DynamoDB returns fewer items plus a
+        // LastEvaluatedKey and AppSync reports `{ items, nextToken }` with empty
+        // `errors`, so firstErrorMessage above cannot see it. Ignoring nextToken
+        // is how a partial list came to be presented as the whole newsroom.
+        setTruncated(Boolean(articleResult.nextToken))
       }
       const categoryFailure = firstErrorMessage(categoryResult.errors)
       if (categoryFailure) {
@@ -169,12 +194,13 @@ export function AdminArticles() {
     }
     setSaving(true)
     setError('')
+    const contentType = String(form.get('contentType') ?? 'NEWS') as Article['contentType']
     try {
       const user = await getCurrentUser()
-      const response = await adminDataClient.models.Article.create({
+      const response = await userPoolDataClient.models.Article.create({
         slug: String(form.get('slug') ?? '').trim(),
         language: 'HI',
-        contentType: String(form.get('contentType') ?? 'NEWS') as 'NEWS',
+        contentType,
         title,
         excerpt: String(form.get('excerpt') ?? '').trim(),
         bodyMarkdown: String(form.get('body') ?? '').trim(),
@@ -185,12 +211,40 @@ export function AdminArticles() {
       })
       const failure = firstErrorMessage(response.errors)
       if (failure) throw new Error(failure)
+      const created = response.data
+      if (!created) throw new Error('लेख सहेजा नहीं जा सका।')
       formElement.reset()
       // form.reset() restores DOM defaults but cannot touch React state, so
       // without this the next article silently inherits this category.
       setCategoryId('')
       setShowForm(false)
-      await load()
+      // Prepend from the mutation's own response instead of refetching.
+      //
+      // This used to call load(), and that is the whole of the reported "saving a
+      // long article does nothing" bug. load() Scans the base table with
+      // limit: 100, but DynamoDB caps a Scan page at 1 MB, and publishing adds
+      // `bodyPlain` (up to 20k chars, ~3 UTF-8 bytes per Devanagari character) to
+      // every row — so a newsroom of long published articles returns only ~8-11
+      // rows. A partial page is not an error, so nothing complained: the article
+      // WAS written, the form closed, and it simply was not in the list. A
+      // base-table Scan is unordered too, so whether the new row survived was
+      // luck. runAction already patches state from its own response for exactly
+      // this reason; create() had been left behind.
+      // `title` and `contentType` come from what was just submitted, not from
+      // the response: the row must render correctly even if the API echoes back a
+      // narrower shape than the full model. Only `id` genuinely has to come from
+      // the server. `status` is Lambda-owned and legitimately absent on a fresh
+      // draft — statusOf() reads that absence as DRAFT.
+      setArticles((current) => [
+        {
+          id: created.id,
+          title,
+          contentType,
+          status: created.status ?? null,
+          revisionCount: created.revisionCount ?? null,
+        },
+        ...current,
+      ])
     } catch (caught) {
       setError(readableAmplifyError(caught))
     } finally {
@@ -212,7 +266,7 @@ export function AdminArticles() {
     setSaving(true)
     setError('')
     try {
-      const response = await adminDataClient.mutations.publishArticle({
+      const response = await userPoolDataClient.mutations.publishArticle({
         articleId,
         action,
         changeSummary: ACTION_SUMMARIES[action],
@@ -382,6 +436,13 @@ export function AdminArticles() {
           {error}
         </p>
       )}
+      {truncated && (
+        // DynamoDB returned a partial page. Silence here is what made a saved
+        // article look lost, so the incompleteness is stated rather than implied.
+        <p role="status" className="mb-4 rounded-card bg-warning-subtle p-3 text-sm text-warning">
+          {`केवल पहले ${articles.length} लेख दिखाए जा रहे हैं — सूची अपूर्ण है। खोज का उपयोग करें या पुराने लेख सीधे खोलें।`}
+        </p>
+      )}
       <div className="overflow-x-auto rounded-card border border-border">
         <table className="w-full min-w-[680px] text-left text-sm">
           <thead className="bg-bg-subtle">
@@ -399,7 +460,19 @@ export function AdminArticles() {
               // offered, so an admin and an editor each see exactly the actions
               // the handler will accept from them — and adding a transition
               // there gives it a button here for free.
-              const actions = availableActions(status, admin)
+              // SCHEDULE is withheld until there is a UI to pick a date.
+              //
+              // runAction sends only { articleId, action, changeSummary }, and
+              // publish-article/handler.ts writes scheduledFor only
+              // `if (nextStatus === 'SCHEDULED' && scheduledFor)`. So the button
+              // moved an article to SCHEDULED with no date, where no reader can
+              // see it and nothing will ever publish it — only an ADMIN pressing
+              // PUBLISH could get it back out. Offering no button is strictly
+              // better than offering that one; the transition itself is fine and
+              // stays in the table for when a date picker exists.
+              const actions = availableActions(status, admin).filter(
+                (action) => action !== 'SCHEDULE',
+              )
               return (
                 <tr key={article.id} className="transition-colors hover:bg-bg-subtle">
                   <td className="p-3 font-semibold">{article.title}</td>

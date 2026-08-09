@@ -5,7 +5,7 @@ import { Search } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { useAnnounce, useDictionary, useLocale } from '@/components/providers'
 import { Button } from '@/components/ui/button'
-import { browserDataClient, readableAmplifyError } from '@/lib/amplify/browser-client'
+import { guestDataClient, readableAmplifyError } from '@/lib/amplify/browser-client'
 import type { Schema } from '@/../amplify/data/resource'
 import { TextInput } from './form-field'
 
@@ -33,7 +33,7 @@ export function SearchForm({ initialQuery = '' }: { initialQuery?: string }) {
     setLoading(true)
     setError('')
     try {
-      const response = await browserDataClient.queries.searchContent({
+      const response = await guestDataClient.queries.searchContent({
         query: value,
         language: locale.toUpperCase(),
         limit: 24,
