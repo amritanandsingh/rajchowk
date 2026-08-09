@@ -35,7 +35,8 @@
     "verify": "npm run verify:lock && npm run ci:outputs:check && npm run format:check && npm run lint && npm run typecheck:all && npm run test && npm run build",
     "verify:ci": "npm run ci:outputs && npm run format:check && npm run lint && npm run typecheck:all && npm run test && npm run build && npm run e2e",
     "verify:backend": "tsx scripts/verify-backend.ts",
-    "admin": "tsx scripts/admin-user.ts"
+    "admin": "tsx scripts/admin-user.ts",
+    "migrate:articles": "tsx scripts/migrate-v2-articles.ts"
   },
   "scriptsRationale": {
     "verify:lock": "FIRST step of `verify`, and it must stay first. A package-lock.json that has drifted out of sync with package.json fails `npm ci` in the Amplify backend phase — before a single line is compiled — while every other check here still passes locally, because they all run against an already-populated node_modules rather than a clean install. Nothing else in this repository can see the drift. It has now broken a main deployment TWICE; the second was Amplify job 10 on 2026-08-09.",

@@ -1,7 +1,5 @@
 import 'server-only'
 
-import { unstable_cache } from 'next/cache'
-
 import type { Schema } from '@/../amplify/data/resource'
 import { publicServerClient } from './config'
 
@@ -89,83 +87,98 @@ function unwrap<T>(
 const emptyPage = <T>(): Page<T> => ({ items: [], nextToken: null })
 
 /**
- * Cache lifetimes, named for the surface that needs them.
+ * THERE IS NO `unstable_cache` HERE ANY MORE. Do not add one back.
  *
- * Next lowers a route's effective `revalidate` to the SMALLEST value it finds
- * anywhere in that route, INCLUDING inside `unstable_cache`. So a single
- * hard-coded 60 here would silently override the longer TTL /sitemap.xml asks
- * for, and the sitemap would be regenerated sixty times an hour for nobody.
- * The TTL is therefore part of the cache key — see `cachedPerTtl`.
+ * These loaders were wrapped in `unstable_cache` with a 60s TTL, on the
+ * reasoning that Amplify Hosting has no on-demand ISR so a TTL is the only
+ * freshness lever. On a single server that reasoning is fine. On Amplify it
+ * produced a **correctness bug in production**, measured on 2026-08-09:
  *
- * On Amplify Hosting there is no on-demand ISR, so a TTL is the only freshness
- * lever that exists. `page: 60` is what makes "publish an article and it
- * appears on the feed" true within a minute.
+ *     AppSync queried directly : article present  20/20
+ *     The live homepage        : article present   2/20
+ *
+ * An article that was genuinely published was invisible to ~90% of visitors,
+ * indefinitely — not for 60 seconds.
+ *
+ * WHY. Amplify serves this page from Lambda (the response carries
+ * `cache-control: no-store`, so the HTML is not CDN-cached and every request
+ * reaches compute). Next's data cache is filesystem-backed under `.next/cache`,
+ * which on Lambda is **per-instance and seeded from the build artifact**. The
+ * build ran while the table was empty, so every instance started life holding a
+ * cached empty result, and instances that never successfully revalidated kept
+ * serving it. Which instance you hit decided whether you saw the article — hence
+ * the flapping rather than a clean 60-second delay.
+ *
+ * So the TTL was not buying freshness, it was buying a second, incoherent copy
+ * of the truth. Reading straight through costs one GSI Query per render — a
+ * `Query` on a sparse index with an INCLUDE projection, a few RCU — which is
+ * the right trade when the alternative is a publishing platform that does not
+ * reliably show published work. The specification's priority order puts
+ * correctness above both performance and cost, and this is exactly that case.
+ *
+ * Freshness is now governed by ONE layer: whatever caching the route itself
+ * declares (`export const revalidate` in the page). One cache, not two
+ * disagreeing ones.
  */
-export const TTL = {
-  /** Reader-facing pages. */
-  page: 60,
-  /** Sitemaps. Crawlers re-fetch on their own cadence; freshness is cheap. */
-  sitemap: 3600,
-} as const
 
-/**
- * Build one cached variant of a loader per TTL, each with its own cache entry.
- *
- * Paying for a second cache entry is what buys the homepage its one-minute
- * freshness while letting the sitemap actually honour the hour it asks for.
- */
-function cachedPerTtl<A extends unknown[], R>(key: string, loader: (...args: A) => Promise<R>) {
-  return (ttl: number) => unstable_cache(loader, [key, String(ttl)], { revalidate: ttl })
+/** One page of the public feed, read live. */
+export async function listPublishedArticles(
+  options: { limit?: number; nextToken?: string } = {},
+): Promise<Page<ArticleCard>> {
+  const client = publicServerClient()
+  const result = await client.queries.listPublishedArticles(
+    {
+      limit: clampLimit(options.limit, 12),
+      nextToken: options.nextToken ?? null,
+    },
+    PUBLIC_AUTH,
+  )
+
+  const data = unwrap('listPublishedArticles', result)
+  if (!data) return emptyPage<ArticleCard>()
+  return {
+    // The resolver guarantees a non-null array, but the generated type is
+    // nullable and a null here would crash the page rather than empty it.
+    items: (data.items ?? []).filter((item): item is ArticleCard => item !== null),
+    nextToken: data.nextToken ?? null,
+  }
 }
 
-const publishedArticlesFor = cachedPerTtl(
-  'public-list-published-articles',
-  async (options: { limit?: number; nextToken?: string } = {}): Promise<Page<ArticleCard>> => {
-    const client = publicServerClient()
-    const result = await client.queries.listPublishedArticles(
-      {
-        limit: clampLimit(options.limit, 12),
-        nextToken: options.nextToken ?? null,
-      },
-      PUBLIC_AUTH,
-    )
+/**
+ * Alias kept for the sitemap and `generateStaticParams`.
+ *
+ * It used to be a longer-TTL cache variant. It is now the same live read: those
+ * callers run at build time or on an hourly route, so they were never the
+ * reason the cache existed, and giving them a separate identity again would
+ * re-introduce two sources of truth.
+ */
+export const listPublishedArticlesHourly = listPublishedArticles
 
-    const data = unwrap('listPublishedArticles', result)
-    if (!data) return emptyPage<ArticleCard>()
-    return {
-      // The resolver guarantees a non-null array, but the generated type is
-      // nullable and a null here would crash the page rather than empty it.
-      items: (data.items ?? []).filter((item): item is ArticleCard => item !== null),
-      nextToken: data.nextToken ?? null,
-    }
-  },
-)
+/**
+ * One published article by slug, read live.
+ *
+ * Uncached for the same reason as the feed above — and it matters more here,
+ * because a cached miss is worse than a cached list: an article that was
+ * published a moment ago would 404 for every visitor unlucky enough to land on
+ * an instance holding the negative result.
+ */
+export async function getPublishedArticle(slug: string): Promise<PublicArticle | null> {
+  const client = publicServerClient()
+  const result = await client.queries.getPublishedArticleBySlug({ slug }, PUBLIC_AUTH)
 
-/** The homepage feed. */
-export const listPublishedArticles = publishedArticlesFor(TTL.page)
-/** For /sitemap.xml, which declares `revalidate = 3600`. */
-export const listPublishedArticlesHourly = publishedArticlesFor(TTL.sitemap)
+  /**
+   * A draft and a genuinely missing article both arrive here as a NotFound
+   * error — the resolver returns the same thing for both on purpose, so an
+   * unpublished headline cannot be confirmed by probing. `unwrap` logs it and
+   * returns null, and the page turns null into a 404.
+   *
+   * That means a real backend outage also renders as 404 rather than as an
+   * error page. The trade is deliberate: the alternative is distinguishing them
+   * in the response, which re-creates the enumeration oracle. The CloudWatch log
+   * line is where an outage is diagnosed.
+   */
+  return unwrap('getPublishedArticleBySlug', result)
+}
 
-const publishedArticleFor = cachedPerTtl(
-  'public-get-published-article',
-  async (slug: string): Promise<PublicArticle | null> => {
-    const client = publicServerClient()
-    const result = await client.queries.getPublishedArticleBySlug({ slug }, PUBLIC_AUTH)
-
-    /**
-     * A draft and a genuinely missing article both arrive here as a NotFound
-     * error — the resolver returns the same thing for both on purpose, so an
-     * unpublished headline cannot be confirmed by probing. `unwrap` logs it and
-     * returns null, and the page turns null into a 404.
-     *
-     * That means a real backend outage also renders as 404 rather than as an
-     * error page. The trade is deliberate: the alternative is distinguishing
-     * them in the response, which re-creates the enumeration oracle. The
-     * CloudWatch log line is where an outage is diagnosed.
-     */
-    return unwrap('getPublishedArticleBySlug', result)
-  },
-)
-
-export const getPublishedArticle = publishedArticleFor(TTL.page)
-export const getPublishedArticleHourly = publishedArticleFor(TTL.sitemap)
+/** Alias for callers that used to want the longer TTL. See the note above. */
+export const getPublishedArticleHourly = getPublishedArticle
