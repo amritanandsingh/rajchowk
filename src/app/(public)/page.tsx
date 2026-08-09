@@ -8,10 +8,16 @@ import { getDictionary } from '@/lib/i18n/hi'
 /**
  * The public feed. No account, no sign-in, no Cognito.
  *
- * ISR with a 60-second TTL. Amplify Hosting does not support on-demand ISR, so
- * a TTL is the only freshness mechanism available — this is what makes
- * "publish an article and it appears on the feed" true within a minute, and it
- * is why the number is 60 rather than something more relaxed.
+ * `revalidate = 60` is the ONLY cache on this path. The data layer
+ * (src/lib/amplify/queries.ts) deliberately holds none — it used to, and two
+ * caches disagreeing is what made a published article invisible to ~90% of
+ * visitors in production. Read the note in that file before adding caching
+ * anywhere below this page.
+ *
+ * Observed on Amplify: this route is served from Lambda with
+ * `cache-control: no-store` rather than as ISR, so in practice every request
+ * re-renders and reads AppSync live. The TTL here is what applies if Amplify
+ * ever does serve it statically, and it stays for that reason.
  *
  * The page is a Server Component and imports nothing from
  * src/lib/amplify/browser-client.ts, so no Amplify JavaScript reaches the

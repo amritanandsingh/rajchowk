@@ -8,26 +8,27 @@ Built with Next.js 15 (App Router), TypeScript and AWS Amplify Gen 2, in **ap-so
 
 ## ⚠️ Deployment isolation — read before deploying
 
-This repository holds a **one-model MVP**. Branch `main` of the Amplify app `rajchowk` (`d1z2jyqeifr0gd`) still hosts a **different, 25-model application** serving www.rajchowk.in. Amplify Gen 2 gives every branch its own backend stack, which is what makes deploying this to a non-production branch safe — and what makes a merge to `main` a **replacement of production**, not a release.
+**This application is live in production.** Branch `main` of the Amplify app `rajchowk` (`d1z2jyqeifr0gd`) serves www.rajchowk.in, cut over from the previous 25-model platform on 2026-08-09 (Amplify job 12). [docs/cutover.md](docs/cutover.md) records what that actually did.
 
-**Do not merge to `main` without following [docs/cutover.md](docs/cutover.md).**
+### Which API is production
 
-### Which stack is which
-
-Getting these backwards costs you an afternoon, because both stacks have 26 tables:
-
-|                                  | AppSync API                  | Stack                                            |
-| -------------------------------- | ---------------------------- | ------------------------------------------------ |
-| **Production** (www.rajchowk.in) | `chrtndf7ozentinkoxedkcltni` | `amplify-d1z2jyqeifr0gd-main-branch-29b529b51d`  |
-| A leftover sandbox               | `74t4otovdvf5rgctcj74cqsq4i` | `amplify-rajchowk-amritsingh-sandbox-3d81aa0f0f` |
-
-Confirm rather than assume:
+**Do not hard-code this.** The AppSync API id changes on any cutover, and Amplify table names embed it, so a stale id points at an orphaned table that still answers queries. Several 26-table sets exist in this account.
 
 ```bash
-aws cloudformation describe-stack-resources --region ap-south-1 \
-  --stack-name amplify-d1z2jyqeifr0gd-main-branch-29b529b51d-data7552DF31-15LNEGO7RSON4 \
+DS=$(aws cloudformation list-stack-resources --region ap-south-1 \
+  --stack-name amplify-d1z2jyqeifr0gd-main-branch-29b529b51d \
+  --query "StackResourceSummaries[?LogicalResourceId=='data7552DF31'].PhysicalResourceId" --output text)
+aws cloudformation describe-stack-resources --region ap-south-1 --stack-name "$DS" \
   --query "StackResources[?ResourceType=='AWS::AppSync::GraphQLApi'].PhysicalResourceId" --output text
 ```
+
+As of the cutover:
+
+|                                  | AppSync API                  | Note                                             |
+| -------------------------------- | ---------------------------- | ------------------------------------------------ |
+| **Production** (www.rajchowk.in) | `2be6l54s7jajzctnucrmlzmjqq` | this schema                                      |
+| Orphaned v2 backend              | `chrtndf7ozentinkoxedkcltni` | retained by the cutover; **still billing**       |
+| Orphaned sandbox                 | `74t4otovdvf5rgctcj74cqsq4i` | `amplify-rajchowk-amritsingh-sandbox-3d81aa0f0f` |
 
 ### What protects production
 
@@ -37,17 +38,15 @@ One guard remains in code, and it fails the deploy rather than warning:
 | ------------------------------------------ | -------------------- | -------------------- |
 | Refuses to synthesise outside `ap-south-1` | `amplify/backend.ts` | `ALLOW_ANY_REGION=1` |
 
-A second guard used to refuse any deploy to `main`. **It has been removed** — see the comment at the top of `amplify/backend.ts`. Once `main` _is_ this application, a check that blocks the MVP from reaching `main` would block every release.
+A second guard once refused any deploy to `main`. It was removed at cutover — see the comment at the top of `amplify/backend.ts`. Now that `main` **is** this application, a check blocking the MVP from `main` would block every release.
 
-What stops an accidental cutover now is **DynamoDB deletion protection, which is enabled on the production tables** (`describe-table` reports `DeletionProtectionEnabled: true` for `Article`, `Poll`, `Comment`, `UserProfile`). So a premature merge does **not** silently delete data — CloudFormation fails partway and rolls back, leaving the stack mid-update. Disabling that protection is the irreversible gate, and it is a deliberate manual step in the runbook.
+> Two earlier claims in this file were wrong and are corrected here. Deletion protection was reported as `false` on production; that reading came from the **sandbox** tables — it is `true` in production. And a cutover was described as deleting the old tables; it does not. Amplify replaces the AppSync API and the old tables are **orphaned**, which is why the v2 data survived and why it is still costing money.
 
-> An earlier revision of this README claimed protection was `false`. That measurement was taken against the **sandbox** tables by mistake. It is `true` in production.
+There is a quieter hazard worth keeping. `ampx sandbox` derives its stack name from `package.json` `name`, so this package is deliberately named **`rajchowk-mvp`**, not `rajchowk` — the latter resolves to the old sandbox stack holding the 25-model schema. The `sandbox` scripts also pin `--identifier mvp`. Do not run a bare `ampx sandbox`. (The product name readers see comes from `NEXT_PUBLIC_SITE_NAME`, not this field.)
 
-There is a third, quieter hazard. `ampx sandbox` derives its stack name from `package.json` `name`, so this package is deliberately named **`rajchowk-mvp`**, not `rajchowk` — the latter resolves to the pre-existing sandbox stack holding the old 25-model schema. The `sandbox` scripts also pin `--identifier mvp`. Do not run a bare `ampx sandbox`. (The product name readers see comes from `NEXT_PUBLIC_SITE_NAME`, not from this field.)
+### Do not remove the `-s ours` merge on `3.0.0`
 
-### The merge itself needs care
-
-On 2026-08-09 the MVP was merged into `main` (PR #4); Amplify job 10 failed on `npm ci` (see _Known behaviour_) and `main` was reverted. Git does not re-apply a reverted merge, so `3.0.0` carries a `-s ours` merge of `main` that records the revert as an ancestor while keeping the MVP tree intact. That is what makes a later PR land the **complete** MVP rather than three stray files. Do not remove that merge commit.
+`main` contains a revert of an earlier MVP merge (PR #4, whose build failed on `npm ci` — see _Known behaviour_). Git does not re-apply a reverted merge, so `3.0.0` carries a `-s ours` merge of `main` that records the revert as an ancestor while keeping the MVP tree intact. Without it a merge to `main` lands three stray files on top of the v2 source tree instead of the whole application.
 
 ---
 

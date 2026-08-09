@@ -4,13 +4,15 @@ import { absoluteUrl } from '@/lib/env'
 /**
  * The sitemap.
  *
- * An explicit route handler rather than Next's `sitemap.ts` convention,
- * because that convention has no way to express the hourly cache this needs —
- * and the loader it calls is a distinct `unstable_cache` entry keyed on the
- * TTL for exactly that reason. Next lowers a route's effective revalidate to
- * the smallest value it finds anywhere inside it, so sharing the homepage's
- * 60-second loader would regenerate the sitemap sixty times an hour for
- * crawlers that fetch it daily.
+ * An explicit route handler rather than Next's `sitemap.ts` convention, because
+ * that convention cannot express the hourly cache this wants — crawlers fetch
+ * on their own cadence and do not need minute-level freshness.
+ *
+ * This used to justify a separate longer-TTL data loader, on the reasoning that
+ * Next lowers a route's revalidate to the smallest value found anywhere inside
+ * it. That loader is gone: the data layer no longer caches at all (see the note
+ * in src/lib/amplify/queries.ts — the second cache was serving stale content in
+ * production). The hourly TTL now lives here alone, which is where it belongs.
  */
 export const revalidate = 3600
 
