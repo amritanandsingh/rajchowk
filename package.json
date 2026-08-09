@@ -31,12 +31,15 @@
     "ci:outputs": "tsx scripts/write-ci-outputs.ts",
     "ci:outputs:sync": "tsx scripts/write-ci-outputs.ts --sync",
     "ci:outputs:check": "tsx scripts/write-ci-outputs.ts --check",
-    "verify": "npm run ci:outputs:check && npm run format:check && npm run lint && npm run typecheck:all && npm run test && npm run build",
+    "verify:lock": "npm ci --dry-run",
+    "verify": "npm run verify:lock && npm run ci:outputs:check && npm run format:check && npm run lint && npm run typecheck:all && npm run test && npm run build",
     "verify:ci": "npm run ci:outputs && npm run format:check && npm run lint && npm run typecheck:all && npm run test && npm run build && npm run e2e",
     "verify:backend": "tsx scripts/verify-backend.ts",
     "admin": "tsx scripts/admin-user.ts"
   },
   "scriptsRationale": {
+    "verify:lock": "FIRST step of `verify`, and it must stay first. A package-lock.json that has drifted out of sync with package.json fails `npm ci` in the Amplify backend phase — before a single line is compiled — while every other check here still passes locally, because they all run against an already-populated node_modules rather than a clean install. Nothing else in this repository can see the drift. It has now broken a main deployment TWICE; the second was Amplify job 10 on 2026-08-09.",
+    "verify:lock:howToFix": "NEVER DELETE package-lock.json. A from-scratch resolution of this dependency set is broken with the current registry state: it emits 8 @aws-cdk/toolkit-lib nodes and omits the nested 1.19.0 that @aws-amplify/data-construct and graphql-api-construct's plugin-types pin, producing an internally inconsistent lock that npm install accepts and npm ci rejects (89 Missing + 2 Invalid). Verified from scratch for BOTH this package.json and the v2 one, so it is a property of the Amplify dependency graph, not of this project. A healthy lock has 16 toolkit-lib nodes. TO REPAIR a drifted lock, run `npm install --package-lock-only` WITH THE EXISTING LOCK STILL IN PLACE — it uses the old lock as a base and fills in the missing nodes; the same command with no lock present reproduces the broken 8. If the lock is ever lost, recover it from git history rather than regenerating. Always finish with `npm run verify:lock`.",
     "sandbox": "--identifier mvp is load-bearing, not cosmetic. A bare `ampx sandbox` targets the stack keyed on <package name>-<username>-sandbox; the identifier gives this MVP its own stack so it can never collide with another sandbox in the same account.",
     "ci:outputs": "amplify_outputs.json is gitignored (it holds the User Pool ID, AppSync endpoint and API key) but is a STATIC import in src/lib/amplify/config.ts. Without a placeholder, webpack cannot resolve it and `next build`, lint, typecheck and tests all fail on a fresh clone before compiling anything. This writes a secret-free stub so every quality gate runs with no AWS account at all.",
     "ci:outputs:check": "Wired into `verify` so a schema change that was not synced into the CI fixture is caught locally rather than as a stale CI build. Run `ci:outputs:sync` after editing amplify/data/resource.ts or amplify/auth/resource.ts and commit the result."

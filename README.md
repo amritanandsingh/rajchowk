@@ -19,7 +19,11 @@ Two guards enforce this, both fail the deploy rather than warning:
 
 There is a third, quieter hazard. `ampx sandbox` derives its stack name from `package.json` `name`, so this package is deliberately named **`rajchowk-mvp`**, not `rajchowk` — the latter resolves to a pre-existing sandbox stack holding the old 25-model schema. The `sandbox` scripts also pin `--identifier mvp`. Do not run a bare `ampx sandbox`. (The product name readers see comes from `NEXT_PUBLIC_SITE_NAME`, not from this field.)
 
+> **Do not count on deletion protection as a second line of defence.** `backend.ts` sets `deletionProtectionEnabled` for production, and the v2 backend did the same — yet `aws dynamodb describe-table` reports **`DeletionProtectionEnabled: false`** on every live v2 production table (`Article`, `Comment`, `Poll`, `NewsletterSubscription` all checked). Whatever the reason, the setting did not reach the deployed resources, so an override of the branch guard really would delete those tables rather than failing safe. **The synth guard is the only protection.** Re-verify with `describe-table` after any production deploy before trusting the flag.
+
 Promoting this to production is a data migration, not a merge.
+
+**This has already been attempted once.** On 2026-08-09 the MVP was merged into `main` (PR #4) and Amplify job 10 failed — not on the guard, but earlier, on `npm ci` (see _Known behaviour_). `main` now carries a revert of that merge, and the MVP lives on its own branch. Because git will not re-apply a reverted merge, any future cutover must be a fresh branch or an explicit revert-of-the-revert, not a second merge of the same commits.
 
 ---
 
@@ -80,7 +84,7 @@ Trade-off, stated because §6 of the specification asks for it: the feed index h
 | **Cognito identity pool**       | Created by `defineAuth`. Guest identities are **disabled** — anonymous reads use an API key from the server, never browser IAM credentials.                                                                 |
 | **AppSync GraphQL API**         | 3 queries, 2 mutations. Query depth capped at 4; introspection disabled in production.                                                                                                                      |
 | **API key**                     | The only credential an anonymous read uses. Reaches exactly two read-only queries; never enters a browser bundle (all public reads are `server-only`). **Expires after 365 days — rotation is a redeploy.** |
-| **DynamoDB table `Article`**    | On-demand billing, point-in-time recovery on, deletion protection in production. Three GSIs (feed, slug, admin list).                                                                                       |
+| **DynamoDB table `Article`**    | On-demand billing, point-in-time recovery on. Three GSIs (feed, slug, admin list). Deletion protection is _requested_ for production in `backend.ts` — see the caveat under "Deployment isolation".         |
 | **Lambda `save-article`**       | Create/update. Scoped IAM: `GetItem`, `PutItem`, `UpdateItem`, `Query` on the table and `/index/*` only.                                                                                                    |
 | **Lambda `set-article-status`** | Publish/unpublish. Scoped IAM: `GetItem`, `UpdateItem` only.                                                                                                                                                |
 | **Amplify Hosting SSR**         | Next.js compute + CDN.                                                                                                                                                                                      |
@@ -301,6 +305,40 @@ The e2e suite runs against a deliberately **unreachable** backend, which is what
 ---
 
 ## Known behaviour worth knowing about
+
+**A drifted lockfile broke a `main` deployment (2026-08-09, Amplify job 10).** `npm ci` refused the committed `package-lock.json` with 89 `Missing:` entries and 2 `Invalid:` version conflicts, failing the build before any code compiled.
+
+The lockfile was _internally inconsistent_: `@aws-amplify/data-construct` and `@aws-amplify/graphql-api-construct` have a nested `@aws-amplify/plugin-types` that pins `@aws-cdk/toolkit-lib@1.19.0`, but the lockfile emitted no node satisfying that pin — only the hoisted `1.32.0`. (`zod@3.24.2` vs `3.25.17` had the same shape.) `npm install` accepts its own output; `npm ci`, which installs the lock exactly as written, does not.
+
+Why every local gate passed anyway: `format`, `lint`, `typecheck`, `test` and `build` all run against an **already-populated `node_modules`**. None of them installs from the lock, so none of them can see the drift. The only check that can is `npm ci` itself.
+
+The guard is **`npm run verify:lock`** (`npm ci --dry-run`), the first step of `npm run verify`. It existed in this repository before, was dropped when the MVP `package.json` was written, and the documented failure recurred verbatim. Do not remove it.
+
+### Never delete `package-lock.json`
+
+This is the part that is genuinely surprising, so it is worth stating flatly: **a from-scratch resolution of this dependency set is broken with the current registry state.** Deleting the lock and reinstalling reproduces the identical 89 + 2 failures — measured for **both** this `package.json` and the v2 one, so it is a property of the Amplify dependency graph rather than of this project.
+
+| Starting point                                        | `@aws-cdk/toolkit-lib` nodes | `npm ci`                |
+| ----------------------------------------------------- | ---------------------------- | ----------------------- |
+| no lockfile → `npm install`                           | 8                            | ✗ 89 missing, 2 invalid |
+| no lockfile → `npm install --package-lock-only`       | 8                            | ✗ same                  |
+| **existing lock → `npm install --package-lock-only`** | **16**                       | **✓ passes**            |
+
+To repair a drifted lock, run the repair **with the old lock still in place** — npm uses it as a base and fills in the missing nodes:
+
+```bash
+npm install --package-lock-only --include=dev --include=optional   # do NOT delete the lock first
+npm run verify:lock                                               # must exit 0 before committing
+```
+
+Sanity check, faster than a full install:
+
+```bash
+node -e "const l=require('./package-lock.json');console.log(Object.keys(l.packages).filter(k=>k.includes('@aws-cdk/toolkit-lib')).length)"
+# 16 = good.  8 = broken.
+```
+
+If the lockfile is ever lost, recover it from git history and repair it — do not regenerate it from nothing.
 
 **`notFound()` responds HTTP 200, not 404.** On Next.js 15.5.22, a page calling `notFound()` renders the not-found UI but returns a 200 status. Reproduced against a minimal `next.config.ts` and Next's own default not-found page, so it is framework behaviour rather than anything in this codebase — and it is unaffected by ISR, `force-dynamic`, or removing `generateStaticParams`. Next's _routing-level_ 404 (a URL matching no route at all) is correct; only `notFound()` called from inside a page is affected.
 
