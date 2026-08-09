@@ -8,22 +8,46 @@ Built with Next.js 15 (App Router), TypeScript and AWS Amplify Gen 2, in **ap-so
 
 ## ⚠️ Deployment isolation — read before deploying
 
-This repository holds a **one-model MVP**. Branch `main` of the Amplify app `rajchowk` (`d1z2jyqeifr0gd`) hosts a **different, 25-model application**. Amplify Gen 2 gives every branch its own backend stack, which is what makes deploying this to a new branch safe — and what makes deploying it to `main` catastrophic: CloudFormation would compare 25 existing tables against the 1 declared here and try to delete 24 of them.
+This repository holds a **one-model MVP**. Branch `main` of the Amplify app `rajchowk` (`d1z2jyqeifr0gd`) still hosts a **different, 25-model application** serving www.rajchowk.in. Amplify Gen 2 gives every branch its own backend stack, which is what makes deploying this to a non-production branch safe — and what makes a merge to `main` a **replacement of production**, not a release.
 
-Two guards enforce this, both fail the deploy rather than warning:
+**Do not merge to `main` without following [docs/cutover.md](docs/cutover.md).**
 
-| Guard                                               | Where                | Overridden by             |
-| --------------------------------------------------- | -------------------- | ------------------------- |
-| Refuses to synthesise on branch `main`/`production` | `amplify/backend.ts` | `ALLOW_MINIMAL_ON_MAIN=1` |
-| Refuses to synthesise outside `ap-south-1`          | `amplify/backend.ts` | `ALLOW_ANY_REGION=1`      |
+### Which stack is which
 
-There is a third, quieter hazard. `ampx sandbox` derives its stack name from `package.json` `name`, so this package is deliberately named **`rajchowk-mvp`**, not `rajchowk` — the latter resolves to a pre-existing sandbox stack holding the old 25-model schema. The `sandbox` scripts also pin `--identifier mvp`. Do not run a bare `ampx sandbox`. (The product name readers see comes from `NEXT_PUBLIC_SITE_NAME`, not from this field.)
+Getting these backwards costs you an afternoon, because both stacks have 26 tables:
 
-> **Do not count on deletion protection as a second line of defence.** `backend.ts` sets `deletionProtectionEnabled` for production, and the v2 backend did the same — yet `aws dynamodb describe-table` reports **`DeletionProtectionEnabled: false`** on every live v2 production table (`Article`, `Comment`, `Poll`, `NewsletterSubscription` all checked). Whatever the reason, the setting did not reach the deployed resources, so an override of the branch guard really would delete those tables rather than failing safe. **The synth guard is the only protection.** Re-verify with `describe-table` after any production deploy before trusting the flag.
+|                                  | AppSync API                  | Stack                                            |
+| -------------------------------- | ---------------------------- | ------------------------------------------------ |
+| **Production** (www.rajchowk.in) | `chrtndf7ozentinkoxedkcltni` | `amplify-d1z2jyqeifr0gd-main-branch-29b529b51d`  |
+| A leftover sandbox               | `74t4otovdvf5rgctcj74cqsq4i` | `amplify-rajchowk-amritsingh-sandbox-3d81aa0f0f` |
 
-Promoting this to production is a data migration, not a merge.
+Confirm rather than assume:
 
-**This has already been attempted once.** On 2026-08-09 the MVP was merged into `main` (PR #4) and Amplify job 10 failed — not on the guard, but earlier, on `npm ci` (see _Known behaviour_). `main` now carries a revert of that merge, and the MVP lives on its own branch. Because git will not re-apply a reverted merge, any future cutover must be a fresh branch or an explicit revert-of-the-revert, not a second merge of the same commits.
+```bash
+aws cloudformation describe-stack-resources --region ap-south-1 \
+  --stack-name amplify-d1z2jyqeifr0gd-main-branch-29b529b51d-data7552DF31-15LNEGO7RSON4 \
+  --query "StackResources[?ResourceType=='AWS::AppSync::GraphQLApi'].PhysicalResourceId" --output text
+```
+
+### What protects production
+
+One guard remains in code, and it fails the deploy rather than warning:
+
+| Guard                                      | Where                | Overridden by        |
+| ------------------------------------------ | -------------------- | -------------------- |
+| Refuses to synthesise outside `ap-south-1` | `amplify/backend.ts` | `ALLOW_ANY_REGION=1` |
+
+A second guard used to refuse any deploy to `main`. **It has been removed** — see the comment at the top of `amplify/backend.ts`. Once `main` _is_ this application, a check that blocks the MVP from reaching `main` would block every release.
+
+What stops an accidental cutover now is **DynamoDB deletion protection, which is enabled on the production tables** (`describe-table` reports `DeletionProtectionEnabled: true` for `Article`, `Poll`, `Comment`, `UserProfile`). So a premature merge does **not** silently delete data — CloudFormation fails partway and rolls back, leaving the stack mid-update. Disabling that protection is the irreversible gate, and it is a deliberate manual step in the runbook.
+
+> An earlier revision of this README claimed protection was `false`. That measurement was taken against the **sandbox** tables by mistake. It is `true` in production.
+
+There is a third, quieter hazard. `ampx sandbox` derives its stack name from `package.json` `name`, so this package is deliberately named **`rajchowk-mvp`**, not `rajchowk` — the latter resolves to the pre-existing sandbox stack holding the old 25-model schema. The `sandbox` scripts also pin `--identifier mvp`. Do not run a bare `ampx sandbox`. (The product name readers see comes from `NEXT_PUBLIC_SITE_NAME`, not from this field.)
+
+### The merge itself needs care
+
+On 2026-08-09 the MVP was merged into `main` (PR #4); Amplify job 10 failed on `npm ci` (see _Known behaviour_) and `main` was reverted. Git does not re-apply a reverted merge, so `3.0.0` carries a `-s ours` merge of `main` that records the revert as an ancestor while keeping the MVP tree intact. That is what makes a later PR land the **complete** MVP rather than three stray files. Do not remove that merge commit.
 
 ---
 
@@ -241,8 +265,7 @@ From the dashboard: **प्रकाशित करें** publishes a draft,
 | `NEXT_PUBLIC_AWS_REGION`    | **Public frontend**          | Defaults to `ap-south-1`.                                                                                 |
 | `NEXT_PUBLIC_ENV`           | **Public frontend**          | `development` \| `sandbox` \| `staging` \| `production`.                                                  |
 | `AWS_PROFILE`, `AWS_REGION` | **Server-side / local only** | Credentials come from `~/.aws`, never a file.                                                             |
-| `ALLOW_MINIMAL_ON_MAIN`     | **Synth-time**               | Escape hatch. Read the guard in `amplify/backend.ts` first.                                               |
-| `ALLOW_ANY_REGION`          | **Synth-time**               | Escape hatch.                                                                                             |
+| `ALLOW_ANY_REGION`          | **Synth-time**               | Escape hatch for the region guard. Unset everywhere by default.                                           |
 | —                           | **Secrets**                  | **None.** Cognito and AppSync credentials exist only in the generated, gitignored `amplify_outputs.json`. |
 
 Everything prefixed `NEXT_PUBLIC_` is inlined into the browser bundle and is world-readable. `src/lib/env.ts` validates all four with zod at module load, so a misconfiguration fails the build with a message naming the variable rather than producing silently wrong canonical URLs.

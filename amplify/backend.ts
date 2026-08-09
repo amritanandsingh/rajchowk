@@ -20,48 +20,41 @@ import { setArticleStatus } from './functions/set-article-status/resource'
 const branch = process.env.AWS_BRANCH ?? null
 const isProduction = branch === 'main' || branch === 'production'
 
-/**
- * GUARD 1 — do not deploy this schema onto the v2 production backend.
+/* ---------------------------------------------------------------------------
+ * THERE WAS A GUARD HERE, AND IT IS GONE ON PURPOSE. Read this before adding
+ * one back, and before merging this branch to `main`.
  *
- * This repository holds a one-model MVP. Branch `main` of the same Amplify app
- * (d1z2jyqeifr0gd) hosts the previous 25-model platform, and Amplify Gen 2
- * gives each branch its own backend stack — which is exactly why deploying
- * this on a NEW branch is safe, and why deploying it on `main` is not.
+ * It refused to synthesise on branch main/production unless
+ * ALLOW_MINIMAL_ON_MAIN=1 was set. Its premise: this repository declares ONE
+ * model, while main's stack held the previous 25-model platform, so a deploy
+ * there would ask CloudFormation to drop 24 live tables. It did its job once —
+ * on 2026-08-09 the MVP was merged to main, and although that build actually
+ * failed earlier (on `npm ci`), this guard was the next thing standing in the
+ * way.
  *
- * If this schema ever reached main's stack, CloudFormation would compare 25
- * existing tables against the 1 declared here and attempt to delete 24 of
- * them. Several carry deletion protection, so the stack update would fail
- * partway and roll back — leaving the production API in an indeterminate state
- * for the duration. There is no version of that outcome anyone wants.
+ * It was removed deliberately as part of promoting this MVP to production.
+ * Once main IS this application, the guard's premise is not merely satisfied,
+ * it is inverted: main's stack becomes the one-model stack, and a check that
+ * refuses to deploy the MVP to main would block every subsequent release.
  *
- * Promoting this MVP to production is a real migration (export Article rows
- * from the v2 table, import into this one, repoint the domain), not a merge.
- * The override exists so that migration is possible; it should be set
- * deliberately, once, by someone who has read this comment.
- */
-if (isProduction && process.env.ALLOW_MINIMAL_ON_MAIN !== '1') {
-  throw new Error(
-    [
-      `Refusing to deploy the minimal MVP backend to branch "${branch}".`,
-      '',
-      'This schema declares ONE model. The production stack for this Amplify app',
-      'holds 25. Deploying here would ask CloudFormation to delete 24 live tables,',
-      'and deletion protection would fail the update partway through.',
-      '',
-      'Deploy this to its own branch instead — Amplify Gen 2 gives every branch an',
-      'isolated backend stack, so a non-production branch cannot touch main:',
-      '',
-      '  aws amplify create-branch --app-id d1z2jyqeifr0gd --branch-name <name> \\',
-      '    --region ap-south-1 --framework "Next.js - SSR" --enable-auto-build',
-      '',
-      'If you have genuinely migrated the data and intend to replace production,',
-      'set ALLOW_MINIMAL_ON_MAIN=1 in the branch environment variables.',
-    ].join('\n'),
-  )
-}
+ * WHAT STILL PROTECTS PRODUCTION, now that this is gone:
+ *
+ *   1. DynamoDB deletion protection, which IS enabled on the v2 production
+ *      tables (verified with `describe-table`: Article, Poll, Comment and
+ *      UserProfile all report DeletionProtectionEnabled: true). A cutover
+ *      deploy therefore does not quietly delete anything — CloudFormation
+ *      fails partway and rolls back. Disabling that protection is the real,
+ *      irreversible gate, and it is a manual step by design.
+ *   2. docs/cutover.md, which is the written procedure for doing this once,
+ *      in the right order, with the article content exported first.
+ *
+ * So the sequence is guarded by an AWS setting and a runbook rather than by
+ * code. If you are reading this because a deploy just destroyed something,
+ * the thing that was skipped is docs/cutover.md.
+ * ------------------------------------------------------------------------- */
 
 /**
- * GUARD 2 — Mumbai, or say so out loud.
+ * REGION GUARD — Mumbai, or say so out loud.
  *
  * The application is for readers in India and every latency and data-residency
  * assumption in it follows from ap-south-1. The region is NOT settable from

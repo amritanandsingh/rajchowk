@@ -48,3 +48,7 @@ yarn-debug.log*
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
+
+# Content exports taken before a production cutover (docs/cutover.md).
+# Article bodies are content, not source, and must not enter git history.
+backup/
