@@ -1,14 +1,13 @@
 {
-  "name": "rajchowk-mvp",
-  "version": "3.0.0",
+  "name": "rajchowk",
+  "version": "0.1.0",
   "private": true,
-  "description": "राज चौक — a minimal editorial publishing platform on AWS Amplify Gen 2",
+  "description": "Raj Chowk — Hindi news and political-opinion platform",
   "type": "module",
   "engines": {
     "node": "22.22.2",
     "npm": ">=10.9.0"
   },
-  "nameRationale": "NOT 'rajchowk'. `ampx sandbox` derives its CloudFormation stack name from this field plus the local username, so `name: \"rajchowk\"` would resolve to the pre-existing amplify-rajchowk-<user>-sandbox stack that still hosts the v2 schema, and a sandbox deploy would overwrite 25 live tables with this one-model schema. The user-visible product name is NEXT_PUBLIC_SITE_NAME (राज चौक); this field is only a build identifier. See README, 'Deployment isolation'.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -22,47 +21,75 @@
     "typecheck:all": "npm run typecheck && npm run typecheck:amplify",
     "test": "vitest run --project=unit --project=components",
     "test:watch": "vitest --project=unit --project=components",
+    "test:unit": "vitest run --project=unit",
+    "test:components": "vitest run --project=components",
+    "test:integration": "vitest run --project=integration",
+    "test:integration:clean": "tsx scripts/clean-integration.ts",
     "test:coverage": "vitest run --project=unit --project=components --coverage",
     "e2e": "playwright test",
-    "e2e:install": "playwright install --with-deps chromium",
-    "sandbox": "ampx sandbox --identifier mvp",
-    "sandbox:once": "ampx sandbox --identifier mvp --once",
-    "sandbox:delete": "ampx sandbox delete --identifier mvp",
+    "e2e:mocked": "playwright test --project=mocked-mobile --project=mocked-a11y --project=mocked-overflow",
+    "e2e:live": "playwright test --project=live-mobile --project=live-desktop",
+    "e2e:ui": "playwright test --ui",
+    "e2e:install": "playwright install --with-deps chromium webkit",
+    "sandbox": "ampx sandbox",
+    "sandbox:once": "ampx sandbox --once",
+    "sandbox:delete": "ampx sandbox delete",
+    "seed": "ampx sandbox seed",
     "ci:outputs": "tsx scripts/write-ci-outputs.ts",
     "ci:outputs:sync": "tsx scripts/write-ci-outputs.ts --sync",
     "ci:outputs:check": "tsx scripts/write-ci-outputs.ts --check",
-    "verify": "npm run ci:outputs:check && npm run format:check && npm run lint && npm run typecheck:all && npm run test && npm run build",
-    "verify:ci": "npm run ci:outputs && npm run format:check && npm run lint && npm run typecheck:all && npm run test && npm run build && npm run e2e",
+    "verify:lock": "npm ci --dry-run",
+    "verify": "npm run verify:lock && npm run ci:outputs:check && npm run format:check && npm run lint && npm run typecheck:all && npm run test && npm run build",
+    "verify:ci": "npm run ci:outputs && npm run format:check && npm run lint && npm run typecheck:all && npm run test && npm run build && npm run e2e:mocked",
+    "verify:full": "npm run verify && npm run test:integration && npm run e2e:mocked",
     "verify:backend": "tsx scripts/verify-backend.ts",
-    "admin": "tsx scripts/admin-user.ts"
+    "verify:parity": "tsx scripts/verify-parity.ts",
+    "role:grant": "tsx scripts/grant-role.ts",
+    "icons": "tsx scripts/generate-icons.ts"
   },
   "scriptsRationale": {
-    "sandbox": "--identifier mvp is load-bearing, not cosmetic. A bare `ampx sandbox` targets the stack keyed on <package name>-<username>-sandbox; the identifier gives this MVP its own stack so it can never collide with another sandbox in the same account.",
-    "ci:outputs": "amplify_outputs.json is gitignored (it holds the User Pool ID, AppSync endpoint and API key) but is a STATIC import in src/lib/amplify/config.ts. Without a placeholder, webpack cannot resolve it and `next build`, lint, typecheck and tests all fail on a fresh clone before compiling anything. This writes a secret-free stub so every quality gate runs with no AWS account at all.",
-    "ci:outputs:check": "Wired into `verify` so a schema change that was not synced into the CI fixture is caught locally rather than as a stale CI build. Run `ci:outputs:sync` after editing amplify/data/resource.ts or amplify/auth/resource.ts and commit the result."
+    "verify:lock": "First step of `verify`, because a package-lock.json that has drifted out of sync with package.json fails `npm ci` in the Amplify backend phase — before any code is compiled — and every other check here would still pass locally against a stale node_modules. That is exactly how a corrupted lock reached main once. `--dry-run` writes nothing. It may reach the registry for metadata, so a fully offline run needs `npm run verify:lock -- --offline`.",
+    "verify:ci": "The exact ladder .github/workflows/ci.yml runs, so a green local run predicts a green PR. Differs from `verify` in two ways: it WRITES a placeholder amplify_outputs.json first (CI has no AWS account, and the file is a static import that webpack cannot resolve without), and it ends with e2e:mocked. It deliberately omits verify:lock, because CI's own `npm ci` already fails on a drifted lock.",
+    "ci:outputs": "Writes the committed, sanitized placeholder outputs so lint/typecheck/test/build/e2e can run with no AWS at all. Never overwrites an existing amplify_outputs.json without --force, so it is safe to run on a developer machine. Run `ci:outputs:sync` after changing amplify/data/resource.ts or amplify/auth/resource.ts, and commit the regenerated fixture.",
+    "ci:outputs:check": "Wired into `verify` so a schema change that was not synced into the CI fixture is caught locally, rather than as a mysteriously stale CI build. Also re-asserts the committed fixture contains no real identifiers."
+  },
+  "overridesRationale": {
+    "sharp": "Next declares optional sharp ^0.34.3, but every 0.34.x inherits four libvips CVEs (GHSA-f88m-g3jw-g9cj). The image optimizer processes user-uploaded avatars, so this is a reachable path. 0.35.x is a semver-minor bump with a stable API. Amplify Hosting supplies its own sharp at runtime; this protects local dev and any self-hosted build.",
+    "postcss": "Next pins postcss 8.4.31 internally, which is affected by three sourceMappingURL/stringify advisories. Build-time only and processing our own CSS, but 8.5.x is a semver-minor bump that clears all three.",
+    "notOverridden": "immutable@3.7.6 under @ardatan/relay-compiler in the Amplify CLI codegen chain. Fixing it needs a two-major bump that risks breaking ampx, our deployment tool, and it is dev-only tooling that parses our own GraphQL schema — never untrusted input. Tracked in the README security notes."
+  },
+  "overrides": {
+    "sharp": "0.35.3",
+    "postcss": "8.5.25"
   },
   "dependencies": {
     "@aws-amplify/adapter-nextjs": "1.7.3",
     "@aws-lambda-powertools/logger": "2.34.0",
+    "@aws-sdk/client-cognito-identity-provider": "3.1101.0",
     "@aws-sdk/client-dynamodb": "3.1101.0",
+    "@aws-sdk/client-sesv2": "3.1101.0",
     "@aws-sdk/lib-dynamodb": "3.1101.0",
     "aws-amplify": "6.20.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
+    "lucide-react": "1.28.0",
     "next": "15.5.22",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-markdown": "10.1.0",
     "rehype-sanitize": "6.0.0",
+    "remark-directive": "4.0.0",
+    "remark-gfm": "4.0.1",
+    "schema-dts": "2.0.0",
     "server-only": "0.0.1",
     "tailwind-merge": "3.6.0",
+    "unist-util-visit": "5.1.0",
     "zod": "4.4.3"
   },
   "devDependencies": {
     "@aws-amplify/backend": "1.24.0",
     "@aws-amplify/backend-cli": "1.9.0",
     "@aws-appsync/utils": "2.1.1",
-    "@aws-sdk/client-cognito-identity-provider": "3.1101.0",
     "@axe-core/playwright": "4.12.1",
     "@eslint/eslintrc": "3.3.6",
     "@playwright/test": "1.62.1",
@@ -71,6 +98,8 @@
     "@testing-library/jest-dom": "7.0.0",
     "@testing-library/react": "16.3.2",
     "@testing-library/user-event": "14.6.1",
+    "@types/hast": "3.0.5",
+    "@types/mdast": "4.0.4",
     "@types/node": "22.20.1",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
@@ -82,6 +111,7 @@
     "eslint": "9.39.5",
     "eslint-config-next": "15.5.22",
     "eslint-config-prettier": "10.1.8",
+    "hast-util-sanitize": "5.0.2",
     "jsdom": "30.0.1",
     "prettier": "3.9.6",
     "prettier-plugin-tailwindcss": "0.8.1",
@@ -90,13 +120,5 @@
     "typescript": "5.9.3",
     "vite": "8.2.0",
     "vitest": "4.1.10"
-  },
-  "overrides": {
-    "sharp": "0.35.3",
-    "postcss": "8.5.25"
-  },
-  "overridesRationale": {
-    "sharp": "Next declares optional sharp ^0.34.3, and every 0.34.x inherits four libvips CVEs (GHSA-f88m-g3jw-g9cj). 0.35.x is a semver-minor bump with a stable API. Amplify Hosting supplies its own sharp at runtime, so this protects local dev and any self-hosted build.",
-    "postcss": "Next pins postcss 8.4.31 internally, which is affected by three sourceMappingURL/stringify advisories. Build-time only and processing our own CSS, but 8.5.x clears all three."
   }
 }

@@ -1,86 +1,79 @@
-/**
- * The DynamoDB document client, shared by both write handlers.
- *
- * Module-scoped on purpose: the client is created once per Lambda container
- * and reused across invocations, so warm calls pay no connection or credential
- * cost. Constructing it inside the handler is the classic way to make a
- * function slower than it needs to be.
- */
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb'
 
-const base = new DynamoDBClient({
-  // Bounded, and low. A write handler behind a synchronous GraphQL mutation
-  // has an editor waiting on it; three SDK retries on a 3-second timeout would
-  // hold the request open past the point anyone is still watching. Failing
-  // fast and letting the UI offer a retry is the better trade.
-  maxAttempts: 3,
-  requestHandler: { requestTimeout: 3_000 },
-})
-
-export const ddb = DynamoDBDocumentClient.from(base, {
-  marshallOptions: {
-    // Amplify writes optional fields as absent, not as null. Matching that
-    // keeps items consistent with rows the GraphQL layer created and keeps
-    // sparse-index semantics working — an attribute set to null still EXISTS
-    // in the index, which would defeat the point of removing feedKey.
-    removeUndefinedValues: true,
-    convertClassInstanceToMap: false,
-  },
-  unmarshallOptions: { wrapNumbers: false },
+/**
+ * Shared DynamoDB document client.
+ *
+ * Declared at module scope so the client and its connection pool survive warm
+ * invocations — recreating it per request adds tens of milliseconds and a TLS
+ * handshake to every call.
+ */
+export const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
+  marshallOptions: { removeUndefinedValues: true },
 })
 
 /**
- * Read a table name from the environment, or fail loudly at first use.
+ * Attributes that Amplify's AppSync resolvers write onto every item and that
+ * reads through GraphQL depend on.
  *
- * The name is injected by `grantTables()` in amplify/backend.ts. If that
- * wiring is ever removed, an undefined table name would otherwise reach the
- * SDK and surface as a confusing `ResourceNotFoundException` naming the string
- * "undefined". This turns a deployment mistake into a message that says which
- * variable is missing.
+ * `__typename` is the one that bites: a raw-SDK PutItem that omits it stores
+ * perfectly happily, and then AppSync cannot resolve the item's type, so
+ * `client.models.X.get()` returns a broken or null row. Every raw-SDK write in
+ * this codebase MUST go through `amplifyItem` or `amplifySetExpression`.
+ *
+ * Gen 2 does not enable conflict resolution, so `_version`/`_lastChangedAt`/
+ * `_deleted` should NOT be present. That is asserted against the real deployed
+ * table by tests/integration/item-shape.test.ts rather than assumed here.
  */
-export function tableName(key: string): string {
-  const value = process.env[key]
-  if (!value) {
-    throw new Error(
-      `Missing environment variable ${key}. Check grantTables() in amplify/backend.ts`,
-    )
-  }
+export type AmplifyMeta = {
+  __typename: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** Wrap a raw item with the attributes Amplify's read path requires. */
+export function amplifyItem<T extends Record<string, unknown>>(
+  typename: string,
+  item: T,
+  now: string = new Date().toISOString(),
+): T & AmplifyMeta {
+  return { ...item, __typename: typename, createdAt: now, updatedAt: now }
+}
+
+/** Table names, read from the environment wired up in backend.ts. */
+export function tableName(envVar: string): string {
+  const value = process.env[envVar]
+  if (!value) throw new Error(`${envVar} is not set — check the grant in amplify/backend.ts`)
   return value
 }
 
 /**
- * Is this the "your ConditionExpression did not hold" error?
+ * True when a DynamoDB error is a failed conditional write.
  *
- * Both write handlers depend on distinguishing it from a real failure:
- *   - save-article uses `attribute_not_exists(id)` for idempotency, so this
- *     means "already created", which is a SUCCESS path.
- *   - set-article-status guards on the current status, so this means "another
- *     admin got there first", which is a CONFLICT.
- * Neither is an internal error, and treating them as one would show an editor
- * a scary message for something entirely ordinary.
+ * The idempotency of every vote, upvote and subscription in this system turns
+ * on recognising this correctly.
  */
 export function isConditionalCheckFailed(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'name' in error &&
-    (error as { name?: unknown }).name === 'ConditionalCheckFailedException'
-  )
+  return error instanceof Error && error.name === 'ConditionalCheckFailedException'
+}
+
+export function isTransactionCancelled(error: unknown): boolean {
+  return error instanceof Error && error.name === 'TransactionCanceledException'
 }
 
 /**
- * Fields Amplify's own resolvers put on every row.
+ * Positional cancellation reasons from a failed TransactWriteItems.
  *
- * A row written by a raw SDK PutItem that lacks `__typename` is invisible to
- * Amplify's GraphQL layer — `Article.get()` returns it with a null type and
- * the client discards it. Since the admin edit form reads through
- * `client.models.Article.get()`, omitting this makes articles that exist in
- * DynamoDB unreadable through the API that created them.
+ * `CancellationReasons[i]` lines up with `TransactItems[i]`, which is how a
+ * handler tells "already voted" (item 0 failed) from "poll closed"
+ * (item 2 failed).
  */
-export function amplifyItem<T extends Record<string, unknown>>(
-  typename: string,
-  item: T,
-): T & { __typename: string } {
-  return { ...item, __typename: typename }
+export function cancellationCodes(error: unknown): string[] {
+  if (!isTransactionCancelled(error)) return []
+  const reasons = (error as { CancellationReasons?: Array<{ Code?: string }> }).CancellationReasons
+  return (reasons ?? []).map((reason) => reason?.Code ?? 'None')
+}
+
+export function cancelledAt(error: unknown, index: number): boolean {
+  return cancellationCodes(error)[index] === 'ConditionalCheckFailed'
 }

@@ -1,22 +1,15 @@
 import type { Metadata } from 'next'
-
-import { ArticleList } from '@/components/editorial/article-list'
-import { Container } from '@/components/ui/container'
+import { ArticleCard } from '@/components/editorial/article-card'
+import { ArticleGrid } from '@/components/editorial/article-grid'
+import { LazyNewsletterForm } from '@/components/forms/lazy'
+import { EmptyState } from '@/components/site/empty-state'
+import { SectionHeading } from '@/components/site/section-heading'
 import { listPublishedArticles } from '@/lib/amplify/queries'
-import { getDictionary } from '@/lib/i18n/hi'
+import { DEFAULT_LOCALE, getDictionary } from '@/lib/i18n'
+import { Container } from '@/components/ui/container'
 
-/**
- * The public feed. No account, no sign-in, no Cognito.
- *
- * ISR with a 60-second TTL. Amplify Hosting does not support on-demand ISR, so
- * a TTL is the only freshness mechanism available — this is what makes
- * "publish an article and it appears on the feed" true within a minute, and it
- * is why the number is 60 rather than something more relaxed.
- *
- * The page is a Server Component and imports nothing from
- * src/lib/amplify/browser-client.ts, so no Amplify JavaScript reaches the
- * reader at all. The feed is HTML.
- */
+// Editorial pages are ISR: Amplify Hosting does not support on-demand ISR, so
+// freshness is a TTL rather than an invalidation. See docs/architecture.md.
 export const revalidate = 60
 
 export const metadata: Metadata = {
@@ -24,35 +17,53 @@ export const metadata: Metadata = {
 }
 
 export default async function HomePage() {
-  const dict = getDictionary()
-  const { items } = await listPublishedArticles({ limit: 12 })
+  const dict = getDictionary(DEFAULT_LOCALE)
+  const [{ items: latest }, { items: opinion }] = await Promise.all([
+    listPublishedArticles({ limit: 10 }),
+    listPublishedArticles({ contentType: 'OPINION', limit: 3 }),
+  ])
+  const featured = latest.find((article) => article.isFeatured) ?? latest[0]
+  const remaining = latest.filter((article) => article.id !== featured?.id).slice(0, 6)
 
-  /**
-   * Distinguish "nothing published" from "the query failed".
-   *
-   * `listPublishedArticles` returns an empty page for both — it logs the
-   * failure server-side and degrades rather than throwing, so the page still
-   * renders. But an empty feed and a broken backend need different copy, and
-   * the only signal available here is that a successful empty read is
-   * indistinguishable from a failed one.
-   *
-   * So: treat empty as empty. The honest alternative — surfacing the failure —
-   * would mean `queries.ts` returning a discriminated result, which it does
-   * for the admin list (`admin-queries.ts`) precisely because there an editor
-   * can act on the difference. A reader cannot. They get the empty state, and
-   * the CloudWatch log line is where the outage is diagnosed.
-   */
   return (
-    <Container>
-      <h1 className="sr-only">
-        {dict.siteName} — {dict.tagline}
-      </h1>
+    <>
+      <Container>
+        <section aria-labelledby="top-story">
+          <h1 id="top-story" className="sr-only">
+            {dict.siteName} — {dict.tagline}
+          </h1>
+          {featured ? (
+            <ArticleCard article={featured} featured />
+          ) : (
+            <EmptyState
+              title="अभी कोई प्रकाशित खबर नहीं है"
+              description="प्रकाशित खबरें यहाँ दिखेंगी।"
+            />
+          )}
+        </section>
 
-      <h2 className="mb-6 font-display text-sm font-bold tracking-wide text-fg-muted uppercase">
-        {dict.feed.heading}
-      </h2>
-
-      <ArticleList articles={items} featureFirst />
-    </Container>
+        {/* The id goes on the <h2> inside SectionHeading, not on a wrapper
+            around the grid. Pointing aria-labelledby at the wrapper made each
+            section's accessible name the full text of every card in it. */}
+        {remaining.length > 0 && (
+          <section className="mt-12" aria-labelledby="latest-heading">
+            <SectionHeading id="latest-heading" title={dict.nav.latest} href="/latest" />
+            <ArticleGrid articles={remaining} />
+          </section>
+        )}
+        {opinion.length > 0 && (
+          <section
+            className="mt-12 rounded-card bg-brand-subtle p-5 sm:p-7"
+            aria-labelledby="opinion-heading"
+          >
+            <SectionHeading id="opinion-heading" title={dict.nav.opinion} href="/opinion" />
+            <ArticleGrid articles={opinion} />
+          </section>
+        )}
+        <section className="mt-12" aria-label={dict.newsletter.title}>
+          <LazyNewsletterForm source="HOMEPAGE" />
+        </section>
+      </Container>
+    </>
   )
 }

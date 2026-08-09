@@ -1,12 +1,10 @@
 /**
  * First focusable node in the document.
  *
- * `z-[60]` puts it above the sticky header (z-50), which is the usual bug: a
- * skip link that renders behind the header looks broken to precisely the
- * keyboard users it exists for.
- *
- * The target must carry `tabIndex={-1}` so focus actually moves rather than
- * merely scrolling — see Container, which owns both halves.
+ * z-[60] puts it above the sticky header (z-50), which is the usual bug — a skip
+ * link that renders behind the header looks broken to the keyboard users it
+ * exists for. The target must carry `tabIndex={-1}` so focus actually moves
+ * rather than merely scrolling.
  */
 export function SkipLink({ targetId, label }: { targetId: string; label: string }) {
   return (

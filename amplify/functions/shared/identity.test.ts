@@ -1,122 +1,158 @@
 import { describe, expect, it } from 'vitest'
-
-import { callerFrom, isAdmin } from './identity'
+import {
+  callerFrom,
+  canPublish,
+  GROUP,
+  hasGroup,
+  isAdmin,
+  isModerator,
+  isStaff,
+  type Caller,
+} from './identity'
 
 /**
- * Caller identity and the admin predicate.
+ * The authorization predicates.
  *
- * These two functions decide every write authorization in the system, so the
- * cases below are deliberately adversarial: what a hostile or malformed
- * identity object does, not merely what a well-formed one does.
- *
- * Worth restating what these tests can and cannot prove. `event.identity` is
- * populated by AppSync from a JWT it has ALREADY verified against the pool's
- * JWKS, so a forged `cognito:groups` never reaches this code. These tests
- * cover the layer below that: given whatever AppSync hands us, do we read the
- * claim correctly and fail closed when we cannot.
+ * These are the functions every privileged Lambda calls before doing anything,
+ * so their boundaries are worth pinning down precisely. The most important
+ * property is negative: identity comes from the verified token and from nowhere
+ * else, so there is no argument a caller could forge.
  */
 
-const sub = '9f1c2d3e-4a5b-6c7d-8e9f-0a1b2c3d4e5f'
+const caller = (groups: string[], overrides: Partial<Caller> = {}): Caller => ({
+  sub: 'sub-1',
+  username: 'user-1',
+  groups,
+  sourceIp: undefined,
+  ...overrides,
+})
 
 describe('callerFrom', () => {
-  it('reads sub, groups and a preferred_username byline', () => {
-    const caller = callerFrom({
-      sub,
-      username: sub,
+  it('extracts the identity from a Cognito claim set', () => {
+    expect(
+      callerFrom({
+        sub: 'abc-123',
+        username: 'amrit',
+        groups: ['ADMIN'],
+        sourceIp: ['203.0.113.7'],
+      }),
+    ).toEqual({
+      sub: 'abc-123',
+      username: 'amrit',
       groups: ['ADMIN'],
-      claims: { sub, preferred_username: 'अमृत', email: 'amrit@example.com' },
+      sourceIp: '203.0.113.7',
     })
-
-    expect(caller).toEqual({ sub, displayName: 'अमृत', groups: ['ADMIN'] })
   })
 
-  it('falls back to the email LOCAL-PART for the byline, never the full address', () => {
-    // An article byline is public. Publishing "amrit@example.com" under a
-    // headline hands a real address to every scraper that reads the feed.
-    const caller = callerFrom({ sub, claims: { sub, email: 'amrit@example.com' } })
-    expect(caller?.displayName).toBe('amrit')
-    expect(caller?.displayName).not.toContain('@')
+  it('returns null when there is no sub — an unauthenticated request', () => {
+    // Every handler treats null as UNAUTHENTICATED. Anything that produced a
+    // non-null caller without a verified sub would be a privilege escalation.
+    expect(callerFrom(undefined)).toBeNull()
+    expect(callerFrom(null)).toBeNull()
+    expect(callerFrom({})).toBeNull()
+    expect(callerFrom({ username: 'amrit', groups: ['ADMIN'] })).toBeNull()
+    expect(callerFrom({ sub: '' })).toBeNull()
   })
 
-  it('falls back to the username when there is no email', () => {
-    const caller = callerFrom({ sub, username: 'editor-1', claims: { sub } })
-    expect(caller?.displayName).toBe('editor-1')
+  it('falls back to the sub when no username is present', () => {
+    expect(callerFrom({ sub: 'abc-123' })?.username).toBe('abc-123')
   })
 
-  it('has a last-resort byline rather than an empty one', () => {
-    const caller = callerFrom({ sub, claims: { sub } })
-    expect(caller?.displayName).toBe('संपादक')
+  it('treats a null or missing group list as no groups, never as all groups', () => {
+    expect(callerFrom({ sub: 'x', groups: null })?.groups).toEqual([])
+    expect(callerFrom({ sub: 'x' })?.groups).toEqual([])
   })
 
-  it('reads groups from the raw cognito:groups claim when `groups` is absent', () => {
-    // Which field is populated depends on the resolver kind. A handler that
-    // only checked one authorised nobody when invoked the other way — an
-    // outage-shaped bug, and an easy one to ship.
-    const caller = callerFrom({ sub, claims: { sub, 'cognito:groups': ['ADMIN'] } })
-    expect(caller?.groups).toEqual(['ADMIN'])
+  it('takes only the first sourceIp, and undefined when the list is empty', () => {
+    expect(callerFrom({ sub: 'x', sourceIp: ['1.1.1.1', '2.2.2.2'] })?.sourceIp).toBe('1.1.1.1')
+    expect(callerFrom({ sub: 'x', sourceIp: [] })?.sourceIp).toBeUndefined()
+    expect(callerFrom({ sub: 'x' })?.sourceIp).toBeUndefined()
   })
 
-  it('reads a space-delimited cognito:groups claim', () => {
-    // Some Cognito configurations serialise the claim as a string.
-    const caller = callerFrom({ sub, claims: { sub, 'cognito:groups': 'ADMIN EDITOR' } })
-    expect(caller?.groups).toEqual(['ADMIN', 'EDITOR'])
-  })
-
-  it('falls back to the sub inside claims when the top-level one is missing', () => {
-    const caller = callerFrom({ claims: { sub } })
-    expect(caller?.sub).toBe(sub)
-  })
-
-  it.each([
-    ['null', null],
-    ['undefined', undefined],
-    ['a string', 'ADMIN'],
-    ['a number', 1],
-    ['an empty object', {}],
-    ['an identity with no sub', { username: 'x', groups: ['ADMIN'] }],
-    ['an identity with an empty sub', { sub: '', groups: ['ADMIN'] }],
-  ])('returns null for %s', (_label, identity) => {
-    // Null rather than a partially-filled object, so a caller cannot proceed
-    // with an empty `sub` and write an article owned by nobody.
-    expect(callerFrom(identity)).toBeNull()
-  })
-
-  it('drops non-string entries from a groups array', () => {
-    const caller = callerFrom({ sub, claims: { sub, 'cognito:groups': ['ADMIN', 42, null] } })
-    expect(caller?.groups).toEqual(['ADMIN'])
+  it('ignores any group claim smuggled in as a non-array', () => {
+    // A malformed claim must not widen access.
+    const result = callerFrom({ sub: 'x', groups: 'ADMIN' as unknown as string[] })
+    expect(isAdmin(result)).toBe(false)
   })
 })
 
-describe('isAdmin', () => {
-  it('is true only for a caller carrying the ADMIN group', () => {
-    expect(isAdmin(callerFrom({ sub, groups: ['ADMIN'] }))).toBe(true)
+describe('hasGroup', () => {
+  it('matches any of the listed groups', () => {
+    expect(hasGroup(caller(['EDITOR']), GROUP.ADMIN, GROUP.EDITOR)).toBe(true)
+    expect(hasGroup(caller(['MEMBER']), GROUP.ADMIN, GROUP.EDITOR)).toBe(false)
   })
 
-  it('is true when ADMIN sits alongside other groups', () => {
-    expect(isAdmin(callerFrom({ sub, groups: ['EDITOR', 'ADMIN'] }))).toBe(true)
+  it('is false for a null caller and for an empty group list', () => {
+    expect(hasGroup(null, GROUP.ADMIN)).toBe(false)
+    expect(hasGroup(caller([]), GROUP.ADMIN)).toBe(false)
   })
 
-  it('is FALSE for an authenticated user in no group', () => {
-    // The requirement in one line: an authenticated ordinary Cognito user must
-    // not automatically be an administrator.
-    expect(isAdmin(callerFrom({ sub, groups: [] }))).toBe(false)
+  it('is exact about group names — no prefix or case tolerance', () => {
+    expect(hasGroup(caller(['admin']), GROUP.ADMIN)).toBe(false)
+    expect(hasGroup(caller(['ADMINISTRATOR']), GROUP.ADMIN)).toBe(false)
+    expect(hasGroup(caller(['SUPER_ADMIN']), GROUP.ADMIN)).toBe(false)
   })
+})
 
-  it('is FALSE for an authenticated user in a different group', () => {
-    expect(isAdmin(callerFrom({ sub, groups: ['EDITOR'] }))).toBe(false)
-  })
-
-  it('is FALSE for an unauthenticated caller', () => {
-    expect(isAdmin(null)).toBe(false)
-  })
-
-  it.each(['admin', 'Admin', 'ADMIN ', ' ADMIN'])(
-    'is FALSE for the near-miss group %o',
-    (group) => {
-      // Case-sensitive, exact. Cognito group names are case-sensitive, so a
-      // lenient comparison here would grant admin to a group someone created
-      // by mistake.
-      expect(isAdmin(callerFrom({ sub, groups: [group] }))).toBe(false)
+describe('role predicates', () => {
+  it.each([
+    ['ADMIN', true, true, true, true],
+    ['EDITOR', false, true, true, false],
+    ['MODERATOR', false, false, true, false],
+    ['MEMBER', false, false, false, false],
+  ])(
+    '%s: admin=%s staff=%s moderator=%s canPublish=%s',
+    (group, admin, staff, moderator, publish) => {
+      const subject = caller([group])
+      expect(isAdmin(subject)).toBe(admin)
+      expect(isStaff(subject)).toBe(staff)
+      expect(isModerator(subject)).toBe(moderator)
+      expect(canPublish(subject)).toBe(publish)
     },
   )
+
+  it('grants nothing to an unauthenticated caller', () => {
+    for (const predicate of [isAdmin, isStaff, isModerator, canPublish]) {
+      expect(predicate(null)).toBe(false)
+    }
+  })
+
+  it('grants nothing to a caller with no groups', () => {
+    const subject = caller([])
+    for (const predicate of [isAdmin, isStaff, isModerator, canPublish]) {
+      expect(predicate(subject)).toBe(false)
+    }
+  })
+
+  it('restricts publishing to ADMIN — the editor/publisher boundary', () => {
+    // "Only an administrator can publish." The publishArticle @auth directive
+    // admits EDITOR too, because editors legitimately submit for review and
+    // return to draft; canPublish is the check that separates those cases.
+    expect(canPublish(caller(['EDITOR']))).toBe(false)
+    expect(canPublish(caller(['MODERATOR']))).toBe(false)
+    expect(canPublish(caller(['EDITOR', 'MODERATOR']))).toBe(false)
+    expect(canPublish(caller(['ADMIN']))).toBe(true)
+  })
+
+  it('resolves a multi-group caller by the widest role held', () => {
+    const subject = caller(['MEMBER', 'MODERATOR'])
+    expect(isModerator(subject)).toBe(true)
+    expect(isStaff(subject)).toBe(false)
+    expect(isAdmin(subject)).toBe(false)
+  })
+
+  it('does not let an unrecognised group grant anything', () => {
+    const subject = caller(['SUPERUSER', 'ROOT', 'OWNER'])
+    for (const predicate of [isAdmin, isStaff, isModerator, canPublish]) {
+      expect(predicate(subject)).toBe(false)
+    }
+  })
+})
+
+describe('GROUP constants', () => {
+  it('matches the group names created by defineAuth', () => {
+    // These strings must equal amplify/auth/resource.ts `groups`. A typo here
+    // silently denies everyone.
+    expect(Object.values(GROUP)).toEqual(['ADMIN', 'EDITOR', 'MODERATOR', 'MEMBER'])
+  })
 })

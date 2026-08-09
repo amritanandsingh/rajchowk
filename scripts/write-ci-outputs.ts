@@ -1,257 +1,262 @@
 /**
- * Produce a secret-free `amplify_outputs.json` so the repository can be
- * linted, typechecked, unit-tested and production-built with NO AWS account.
+ * Produce a secret-free `amplify_outputs.json` so the repo can be linted,
+ * typechecked, unit-tested, built and e2e-tested with NO AWS account at all.
  *
- * WHY THIS EXISTS
+ * Why this exists
  * ---------------
- * `amplify_outputs.json` is a static default-import in
+ * `amplify_outputs.json` is a static default-import in src/lib/media.ts,
  * src/lib/amplify/config.ts and src/lib/amplify/browser-client.ts, and it is
- * gitignored — correctly, because it carries the User Pool ID, Identity Pool
- * ID, AppSync URL and the public API key. Webpack therefore cannot resolve
- * those modules on a fresh clone, and `next build` dies with
+ * gitignored (correctly — it carries the User Pool ID, Identity Pool ID,
+ * AppSync URL and the public API key). Webpack therefore cannot resolve those
+ * modules on a fresh clone, and `next build` dies with
  *
  *   Module not found: Can't resolve '@/../amplify_outputs.json'
  *
- * before it compiles a single page. Without this script, every quality gate
- * could only run AFTER `ampx pipeline-deploy` had already mutated AWS — which
- * is the wrong order to discover that the build is broken.
+ * before it compiles a single page. That is the single reason this repo had no
+ * CI: every quality gate in amplify.yml runs AFTER `ampx pipeline-deploy` has
+ * already mutated AWS, because there was no way to run them anywhere else.
  *
- * WHAT MAKES THE STUB USABLE
+ * What makes the stub usable
  * --------------------------
  * `data.model_introspection` is not optional padding. Amplify's runtime
- * `generateClient()` builds `client.queries.*` and `client.models.*` FROM it,
- * so omitting it makes every call in src/lib/amplify/queries.ts `undefined`
- * and the build fails with a TypeError rather than a network error.
+ * `generateClient()` builds `client.queries.*` / `client.models.*` from it, so
+ * omitting it makes every call in src/lib/amplify/queries.ts `undefined` and
+ * the build fails with a TypeError instead of a network error. The blob is
+ * ~97 KB of pure GraphQL schema shape derived from amplify/data/resource.ts —
+ * model names, field types, enum members. It contains no endpoint, no key, no
+ * account ID (asserted below), so it is safe to commit.
  *
  * Endpoints point at 127.0.0.1:1, which refuses instantly with no DNS lookup.
  * Public pages must therefore survive an unreachable backend — `unwrap()` in
- * src/lib/amplify/queries.ts logs and returns null, so pages prerender as
- * empty rather than throwing. A build that breaks here is a real regression in
- * error handling, not a problem with this stub.
+ * src/lib/amplify/queries.ts already logs and returns null on failure, so they
+ * prerender as empty rather than throwing. A build that breaks here is a real
+ * regression in error handling, not a problem with this stub.
  *
- * USAGE
+ * Usage
  * -----
  *   tsx scripts/write-ci-outputs.ts            # write the stub (CI)
  *   tsx scripts/write-ci-outputs.ts --force    # overwrite an existing file
- *   tsx scripts/write-ci-outputs.ts --sync     # regenerate the fixture from the schema
+ *   tsx scripts/write-ci-outputs.ts --sync     # refresh the fixture from a real sandbox
  *   tsx scripts/write-ci-outputs.ts --check    # fail if the fixture has drifted
  *
- * `--sync` NEEDS NO AWS ACCOUNT. It reads amplify/data/resource.ts directly,
- * runs the same schema transform Amplify runs at synth time, and feeds the
- * resulting SDL to the model generator. So the fixture is derivable from the
- * source rather than harvested from a deployment, and `--check` can compare
- * the committed fixture against what the current schema would produce. That is
- * what makes drift detectable: a fixture copied out of a sandbox can only be
- * checked for existence, not for correctness.
+ * Run `--sync` whenever amplify/data/resource.ts or amplify/auth/resource.ts
+ * changes, otherwise CI builds against a stale schema shape. `--check` is wired
+ * into `npm run verify` so the drift is caught locally rather than in a PR.
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { generateModelsSync } from '@aws-amplify/graphql-generator'
+import { dirname, resolve } from 'node:path'
+import { mkdirSync } from 'node:fs'
 
 const OUTPUTS_PATH = resolve(process.cwd(), 'amplify_outputs.json')
 const FIXTURE_PATH = resolve(process.cwd(), 'tests/fixtures/ci-amplify-outputs.json')
 
-const args = new Set(process.argv.slice(2))
-const force = args.has('--force')
-const sync = args.has('--sync')
-const check = args.has('--check')
-
 /**
- * A placeholder that is obviously a placeholder.
- *
- * Every identifier below is syntactically valid for its field — Amplify parses
- * this at import time and a malformed region or pool id fails the build with a
- * confusing message — but none of them resolve to anything. The region is real
- * because `Amplify.configure` validates its shape.
+ * Placeholders. Every one is syntactically valid for the consumer that parses
+ * it — Amplify derives the region from the pool ID, so a malformed one throws
+ * inside `Amplify.configure` at module load and the failure looks nothing like
+ * its cause.
  */
-const PLACEHOLDER = {
-  version: '1.4',
-  auth: {
-    user_pool_id: 'ap-south-1_XXXXXXXXX',
-    aws_region: 'ap-south-1',
-    user_pool_client_id: 'xxxxxxxxxxxxxxxxxxxxxxxxxx',
-    identity_pool_id: 'ap-south-1:00000000-0000-4000-8000-000000000000',
-    mfa_methods: ['TOTP'],
-    standard_required_attributes: ['email'],
-    username_attributes: ['email'],
-    user_verification_types: ['email'],
-    mfa_configuration: 'OPTIONAL',
-    password_policy: {
-      min_length: 12,
-      require_lowercase: true,
-      require_uppercase: true,
-      require_numbers: true,
-      require_symbols: true,
-    },
-    unauthenticated_identities_enabled: false,
-    groups: [{ ADMIN: { precedence: 0 } }],
-  },
-  data: {
-    url: 'http://127.0.0.1:1/graphql',
-    aws_region: 'ap-south-1',
-    api_key: 'da2-000000000000000000000000',
-    default_authorization_type: 'AMAZON_COGNITO_USER_POOLS',
-    authorization_types: ['API_KEY'],
-    model_introspection: null as unknown,
-  },
-  custom: { environment: 'ci', region: 'ap-south-1' },
+const CI = {
+  region: 'ap-south-1',
+  userPoolId: 'ap-south-1_CI0000000',
+  userPoolClientId: 'ci000000000000000000000000',
+  identityPoolId: 'ap-south-1:00000000-0000-4000-8000-000000000000',
+  graphqlUrl: 'http://127.0.0.1:1/graphql',
+  apiKey: 'da2-ci0000000000000000000000',
+  bucket: 'ci-placeholder-media-bucket',
+  environment: 'ci',
+  siteUrl: 'http://localhost:3000',
 } as const
 
 /**
- * Fields that must never appear in the committed fixture.
- *
- * The account-id pattern excludes an all-zero run, because the placeholder
- * identity pool id legitimately ends in one and the assertion would otherwise
- * reject its own output. Excluding it is safe in a way that loosening the
- * digit count would not be: 000000000000 is not an AWS account.
+ * Anything matching these must never reach the committed fixture. Checked
+ * against the serialized result rather than field-by-field, so a new key added
+ * to amplify_outputs.json by a future Amplify release cannot smuggle a real
+ * identifier through a sanitizer that does not know about it yet.
  */
-const FORBIDDEN_PATTERNS: Array<[string, RegExp]> = [
-  ['a real AWS account id', /\b(?!0{12}\b)\d{12}\b/],
-  ['a real AppSync endpoint', /https:\/\/[a-z0-9]+\.appsync-api\./],
-  ['a real Cognito domain', /\.auth\.[a-z0-9-]+\.amazoncognito\.com/],
-  ['a real Cognito user pool id', /ap-south-1_(?!X{9})[A-Za-z0-9]{9}/],
+const SECRET_PATTERNS: ReadonlyArray<readonly [string, RegExp]> = [
+  ['AppSync API key', /da2-(?!ci0)[a-z0-9]{20,}/i],
+  ['AppSync endpoint', /appsync-(api|realtime)/i],
+  ['Cognito user pool ID', /[a-z]{2}-[a-z]+-\d_(?!CI000)[A-Za-z0-9]{9,}/],
+  ['Cognito identity pool ID', /[a-z]{2}-[a-z]+-\d:(?!00000000-0000-4000)[0-9a-f-]{36}/i],
+  ['deployed S3 bucket', /amplify-[a-z0-9]+-[a-z0-9]+-/i],
+  // The all-zero placeholder inside the fake identity pool ID is not an account.
+  ['AWS account ID', /\b(?!0{12}\b)\d{12}\b/],
+  ['ARN', /arn:aws/i],
 ]
 
-function assertSecretFree(json: string): void {
-  for (const [label, pattern] of FORBIDDEN_PATTERNS) {
-    const match = pattern.exec(json)
-    if (match) {
-      throw new Error(
-        `Refusing to write the CI fixture: it contains ${label} (${match[0]}). ` +
-          'The fixture is committed to Git and must hold no real identifiers.',
-      )
+/**
+ * Global AWS service endpoints. These are the same string for every customer,
+ * carry no account or resource identifier, and legitimately appear in a real
+ * outputs file — `cognito-identity.amazonaws.com` shows up under `storage`.
+ * Anything else ending in amazonaws.com is account-specific by construction and
+ * is treated as a leak.
+ */
+const GENERIC_AWS_HOSTS: ReadonlySet<string> = new Set([
+  'cognito-identity.amazonaws.com',
+  'cognito-idp.amazonaws.com',
+  's3.amazonaws.com',
+])
+
+type Json = { [key: string]: unknown }
+
+function readJson(path: string): Json {
+  return JSON.parse(readFileSync(path, 'utf8')) as Json
+}
+
+function asObject(value: unknown): Json {
+  return value && typeof value === 'object' ? (value as Json) : {}
+}
+
+/** Replace every real identifier with its CI placeholder, in place on a clone. */
+function sanitize(real: Json): Json {
+  const out = structuredClone(real)
+
+  const auth = asObject(out.auth)
+  if (Object.keys(auth).length > 0) {
+    auth.user_pool_id = CI.userPoolId
+    auth.user_pool_client_id = CI.userPoolClientId
+    auth.identity_pool_id = CI.identityPoolId
+    auth.aws_region = CI.region
+    out.auth = auth
+  }
+
+  const data = asObject(out.data)
+  if (Object.keys(data).length > 0) {
+    data.url = CI.graphqlUrl
+    data.api_key = CI.apiKey
+    data.aws_region = CI.region
+    out.data = data
+  }
+
+  const storage = asObject(out.storage)
+  if (Object.keys(storage).length > 0) {
+    storage.bucket_name = CI.bucket
+    storage.aws_region = CI.region
+    if (Array.isArray(storage.buckets)) {
+      storage.buckets = storage.buckets.map((entry) => ({
+        ...asObject(entry),
+        bucket_name: CI.bucket,
+        aws_region: CI.region,
+      }))
     }
+    out.storage = storage
+  }
+
+  out.custom = {
+    ...asObject(out.custom),
+    environment: CI.environment,
+    siteUrl: CI.siteUrl,
+  }
+
+  return out
+}
+
+/** Refuse to emit anything that still looks like a real deployment. */
+function assertNoSecrets(candidate: Json): void {
+  const serialized = JSON.stringify(candidate)
+  const leaks = SECRET_PATTERNS.filter(([, pattern]) => pattern.test(serialized)).map(
+    ([label, pattern]) => `  ${label}: ${serialized.match(pattern)?.[0] ?? '(match)'}`,
+  )
+
+  const foreignHosts = [
+    ...new Set(serialized.match(/[a-z0-9._-]+\.amazonaws\.com/gi) ?? []),
+  ].filter((host) => !GENERIC_AWS_HOSTS.has(host.toLowerCase()))
+  leaks.push(...foreignHosts.map((host) => `  account-specific AWS host: ${host}`))
+
+  if (leaks.length > 0) {
+    throw new Error(
+      `Refusing to write — the sanitized outputs still contain real identifiers:\n${leaks.join('\n')}\n\n` +
+        'A new key in amplify_outputs.json probably needs handling in sanitize().',
+    )
   }
 }
 
-/**
- * Build the model introspection from the schema source, with no AWS involved.
- *
- * `schema.transform()` is the same call Amplify makes during synth; it turns
- * the `a.schema({...})` builder into AppSync SDL. `generateModelsSync` with
- * target 'introspection' is the same generator `ampx generate` runs against a
- * deployed API. Composing them locally gives byte-identical output to the
- * deployed path — the model introspection is a pure function of the schema, so
- * there is nothing a real deployment could add.
- *
- * Reaching through `data.props.schema` is the one fragile part: it is Amplify
- * internals, not public API. If a version bump breaks it, the failure is loud
- * (a TypeError here) rather than silent, and the fallback is to lift
- * `data.model_introspection` out of a real `amplify_outputs.json` by hand.
- */
-async function buildIntrospection(): Promise<unknown> {
-  const { data } = await import('../amplify/data/resource')
-
-  // Double assertion through `unknown` because `props` is not on the public
-  // ConstructFactory type. That is the honest signal here: this reaches into
-  // Amplify internals, and a version bump could remove it. The failure would
-  // be a loud TypeError in `npm run verify`, not silent wrong output.
-  const sdl = (
-    data as unknown as { props: { schema: { transform: () => { schema: string } } } }
-  ).props.schema.transform().schema
-
-  const generated = generateModelsSync({
-    schema: sdl,
-    target: 'introspection',
-    // DataStore is not used — this app talks to AppSync directly — and leaving
-    // it on emits sync-protocol fields (_version, _lastChangedAt, _deleted)
-    // that our schema does not have.
-    isDataStoreEnabled: false,
-    // Amplify declares createdAt/updatedAt explicitly in this schema because
-    // they are GSI sort keys, so the generator must not add its own.
-    addTimestampFields: false,
-    improvePluralization: true,
-    respectPrimaryKeyAttributesOnConnectionField: true,
-    generateModelsForLazyLoadAndCustomSelectionSet: true,
-  })
-
-  // The generator returns { '<filename>': '<contents>' }; there is exactly one
-  // entry for the introspection target.
-  const [contents] = Object.values(generated)
-  if (!contents) throw new Error('The model generator produced no output for the schema.')
-  return JSON.parse(contents)
+function introspectionOf(outputs: Json): unknown {
+  return asObject(outputs.data).model_introspection
 }
 
-/** Regenerate the committed fixture from the schema. */
-async function syncFixture(): Promise<void> {
-  const introspection = await buildIntrospection()
-  const json = fixtureJson(introspection)
-  assertSecretFree(json)
-  writeFileSync(FIXTURE_PATH, json)
-  console.log(`Regenerated the CI fixture from amplify/data/resource.ts -> ${FIXTURE_PATH}`)
-}
-
-function fixtureJson(introspection: unknown): string {
-  const fixture = {
-    ...PLACEHOLDER,
-    data: { ...PLACEHOLDER.data, model_introspection: introspection },
+function syncFixture(): void {
+  if (!existsSync(OUTPUTS_PATH)) {
+    throw new Error(
+      '--sync needs a real amplify_outputs.json to derive the shape from.\n' +
+        'Deploy a sandbox first:  npx ampx sandbox --once',
+    )
   }
-  return `${JSON.stringify(fixture, null, 2)}\n`
+
+  const sanitized = sanitize(readJson(OUTPUTS_PATH))
+  assertNoSecrets(sanitized)
+
+  mkdirSync(dirname(FIXTURE_PATH), { recursive: true })
+  writeFileSync(FIXTURE_PATH, `${JSON.stringify(sanitized, null, 2)}\n`, 'utf8')
+
+  const models = Object.keys(asObject(asObject(introspectionOf(sanitized)).models)).length
+  console.log(`Wrote ${FIXTURE_PATH}`)
+  console.log(`  ${models} models in model_introspection, no secrets detected.`)
 }
 
-function readFixture(): string {
+function checkFixture(): void {
   if (!existsSync(FIXTURE_PATH)) {
-    throw new Error(
-      `Missing ${FIXTURE_PATH}. Deploy a sandbox and run \`npm run ci:outputs:sync\`, ` +
-        'then commit the generated fixture.',
-    )
-  }
-  return readFileSync(FIXTURE_PATH, 'utf8')
-}
-
-/**
- * Fail if the committed fixture no longer matches the schema.
- *
- * This is the check worth having, and it is only possible because the fixture
- * is DERIVED rather than harvested: adding a field to `Article` and forgetting
- * to re-sync now fails locally in `npm run verify`, instead of producing a CI
- * build whose `client.queries.*` shape silently disagrees with the deployed
- * API.
- */
-async function checkFixture(): Promise<void> {
-  const committed = readFixture()
-  assertSecretFree(committed)
-
-  const parsed = JSON.parse(committed) as { data?: { model_introspection?: unknown } }
-  if (!parsed.data?.model_introspection) {
-    throw new Error(
-      'The CI fixture has no data.model_introspection. Amplify builds client.queries.* from it, ' +
-        'so every call would be undefined at runtime. Run `npm run ci:outputs:sync`.',
-    )
+    throw new Error(`Fixture missing: ${FIXTURE_PATH}\nGenerate it with: npm run ci:outputs:sync`)
   }
 
-  const expected = fixtureJson(await buildIntrospection())
-  if (expected !== committed) {
-    throw new Error(
-      'The CI fixture is out of date with amplify/data/resource.ts.\n' +
-        'Run `npm run ci:outputs:sync` and commit tests/fixtures/ci-amplify-outputs.json.',
-    )
-  }
+  // Always re-assert the committed fixture is clean, even with no sandbox to
+  // compare against — that check is cheap and it is the one that matters.
+  const fixture = readJson(FIXTURE_PATH)
+  assertNoSecrets(fixture)
 
-  console.log('CI fixture matches the schema and is secret-free.')
-}
-
-function writeOutputs(): void {
-  if (existsSync(OUTPUTS_PATH) && !force) {
-    // Never clobber a developer's real sandbox outputs by accident — that
-    // would silently point their `npm run dev` at 127.0.0.1:1.
-    console.log('amplify_outputs.json already exists; leaving it alone (pass --force to replace).')
+  if (!existsSync(OUTPUTS_PATH)) {
+    console.log('No local amplify_outputs.json — fixture is clean, drift not checked.')
     return
   }
 
-  const json = readFixture()
-  assertSecretFree(json)
-  writeFileSync(OUTPUTS_PATH, json)
-  console.log(`Wrote placeholder amplify_outputs.json (${json.length} bytes).`)
+  const live = JSON.stringify(introspectionOf(readJson(OUTPUTS_PATH)))
+  const stub = JSON.stringify(introspectionOf(fixture))
+
+  if (live !== stub) {
+    throw new Error(
+      'CI outputs fixture has drifted from the deployed schema.\n' +
+        'amplify/data/resource.ts changed without regenerating the fixture, so CI\n' +
+        'would build against a stale GraphQL shape.\n\n' +
+        'Fix:  npm run ci:outputs:sync   (then commit tests/fixtures/ci-amplify-outputs.json)',
+    )
+  }
+
+  console.log('CI outputs fixture matches the deployed schema.')
 }
 
-async function main(): Promise<void> {
-  if (sync) await syncFixture()
-  else if (check) await checkFixture()
-  else writeOutputs()
+function writeStub(force: boolean): void {
+  if (!existsSync(FIXTURE_PATH)) {
+    throw new Error(`Fixture missing: ${FIXTURE_PATH}\nGenerate it with: npm run ci:outputs:sync`)
+  }
+
+  if (existsSync(OUTPUTS_PATH) && !force) {
+    // Clobbering a developer's real sandbox config would be silent and
+    // extremely annoying to diagnose, so this is opt-in.
+    console.log(
+      'amplify_outputs.json already exists — leaving it alone. Use --force to replace it.',
+    )
+    return
+  }
+
+  const fixture = readJson(FIXTURE_PATH)
+  assertNoSecrets(fixture)
+  writeFileSync(OUTPUTS_PATH, `${JSON.stringify(fixture, null, 2)}\n`, 'utf8')
+  console.log(`Wrote placeholder amplify_outputs.json (environment="${CI.environment}").`)
+  console.log('Backend calls will fail fast against 127.0.0.1:1 — this is expected.')
 }
 
-main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : error)
-  process.exit(1)
-})
+function main(): void {
+  const args = new Set(process.argv.slice(2))
+
+  try {
+    if (args.has('--sync')) syncFixture()
+    else if (args.has('--check')) checkFixture()
+    else writeStub(args.has('--force'))
+  } catch (error) {
+    console.error(`\n${error instanceof Error ? error.message : String(error)}\n`)
+    process.exitCode = 1
+  }
+}
+
+main()
