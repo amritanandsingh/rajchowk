@@ -1,78 +1,59 @@
 import { util } from '@aws-appsync/utils'
 
 /**
- * The public article feed.
+ * The public article feed. Newest published article first.
  *
  * APPSYNC_JS CONSTRAINTS — every resolver in this directory must obey them.
  * These files are uploaded to AppSync VERBATIM: unbundled, untranspiled. So:
  *   - must be .js, never .ts
- *   - may import nothing except '@aws-appsync/utils' (no shared helper module)
+ *   - may import nothing except '@aws-appsync/utils' (no shared helper module,
+ *     which is why the limit-clamping below is duplicated per resolver)
  *   - no async/await, no Promises, no try/catch, no throw (use util.error)
  *   - no new Date() (use util.time.*), no Math.random() (use util.autoId())
  *   - exactly two exports, named `request` and `response`
+ * The ESLint config enforces all of these mechanically.
  *
- * SECURITY: the status is hard-coded into the partition key here and cannot be
- * influenced by the caller. There is no argument that carries a status, and
- * the `language` argument is checked against an allow-list so it cannot be
- * used to reach another partition. The redundant status filter means that even
- * a stale feedKey could only ever HIDE a published article, never reveal an
- * unpublished one.
+ * SECURITY. The partition key is the literal 'PUBLISHED', written here and
+ * derived from nothing the caller sent. There is no argument that carries a
+ * status, so there is no input to validate — the attack surface is absent
+ * rather than defended. The redundant status filter means that even a stale
+ * feedKey could only ever HIDE a published article, never reveal a draft.
+ *
+ * Note the index is SPARSE: `feedKey` is removed from the item when an article
+ * is not published, so drafts have no entry here at all.
  */
 
 const MAX_LIMIT = 24
 const DEFAULT_LIMIT = 12
-const ALLOWED_LANGUAGES = ['HI', 'EN']
-const ALLOWED_CONTENT_TYPES = [
-  'NEWS',
-  'OPINION',
-  'ANALYSIS',
-  'EXPLAINER',
-  'FACT_CHECK',
-  'INTERVIEW',
-  'EDITORIAL',
-]
+const PUBLISHED = 'PUBLISHED'
 
 export function request(ctx) {
   const args = ctx.args || {}
-
-  const language = ALLOWED_LANGUAGES.indexOf(args.language) >= 0 ? args.language : 'HI'
 
   let limit = args.limit === null || args.limit === undefined ? DEFAULT_LIMIT : args.limit
   if (limit < 1) limit = DEFAULT_LIMIT
   if (limit > MAX_LIMIT) limit = MAX_LIMIT
 
-  // Server-authoritative. The caller supplies no part of this.
-  const feedKey = 'PUBLISHED#' + language
   const now = util.time.nowISO8601()
-
-  // Scheduled-but-not-yet-due articles carry a future publishedAt, so the sort
-  // key bound is what keeps an embargoed story out of the feed even in the
-  // window before the scheduler flips its status.
-  const query = {
-    expression: '#pk = :pk AND #sk <= :now',
-    expressionNames: { '#pk': 'feedKey', '#sk': 'publishedAt' },
-    expressionValues: util.dynamodb.toMapValues({ ':pk': feedKey, ':now': now }),
-  }
-
-  const filterNames = { '#status': 'status' }
-  const filterValues = { ':published': 'PUBLISHED' }
-  let filterExpression = '#status = :published'
-
-  if (ALLOWED_CONTENT_TYPES.indexOf(args.contentType) >= 0) {
-    filterExpression = filterExpression + ' AND #contentType = :contentType'
-    filterNames['#contentType'] = 'contentType'
-    filterValues[':contentType'] = args.contentType
-  }
 
   return {
     operation: 'Query',
     index: 'articlesByFeedKeyAndPublishedAt',
-    query: query,
-    filter: {
-      expression: filterExpression,
-      expressionNames: filterNames,
-      expressionValues: util.dynamodb.toMapValues(filterValues),
+    query: {
+      // The sort-key bound is not decoration. If a publishedAt is ever set in
+      // the future, this is what keeps the article out of the feed until its
+      // moment arrives, without needing a scheduler to be punctual.
+      expression: '#pk = :pk AND #sk <= :now',
+      expressionNames: { '#pk': 'feedKey', '#sk': 'publishedAt' },
+      expressionValues: util.dynamodb.toMapValues({ ':pk': PUBLISHED, ':now': now }),
     },
+    filter: {
+      expression: '#status = :published',
+      expressionNames: { '#status': 'status' },
+      expressionValues: util.dynamodb.toMapValues({ ':published': PUBLISHED }),
+    },
+    // Newest first. This is the whole reason the feed is a Query on a sorted
+    // index rather than a Scan plus an in-memory sort.
     scanIndexForward: false,
     limit: limit,
     nextToken: args.nextToken,
@@ -89,28 +70,18 @@ export function response(ctx) {
   const items = result.items || []
   const out = []
 
-  // Explicit field allowlist. Nothing reaches the client that is not named
-  // here, so a sensitive field added to the Article model later cannot leak
-  // through this feed without someone also editing this list.
+  // EXPLICIT FIELD ALLOWLIST. Nothing reaches an anonymous visitor that is not
+  // named here, so a field added to the Article model later cannot leak
+  // through this feed without someone also editing this list. `authorSub` and
+  // `content` are absent by construction, not by filtering.
   for (const item of items) {
     out.push({
       id: item.id,
       slug: item.slug,
       title: item.title,
-      subtitle: item.subtitle,
-      excerpt: item.excerpt,
-      language: item.language,
-      contentType: item.contentType,
-      categoryId: item.categoryId,
-      heroImageKey: item.heroImageKey,
-      heroImageAlt: item.heroImageAlt,
-      authorDisplayName: item.authorDisplayName,
+      summary: item.summary,
+      authorName: item.authorName,
       publishedAt: item.publishedAt,
-      readingMinutes: item.readingMinutes,
-      isBreaking: item.isBreaking === true,
-      isFeatured: item.isFeatured === true,
-      commentCount: item.commentCount || 0,
-      youtubeVideoId: item.youtubeVideoId,
     })
   }
 

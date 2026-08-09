@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { unstable_cache } from 'next/cache'
+
 import type { Schema } from '@/../amplify/data/resource'
 import { publicServerClient } from './config'
 
@@ -9,37 +10,40 @@ import { publicServerClient } from './config'
  *
  * Every public read in the application goes through this module, and every
  * function here calls one of the APPSYNC_JS custom queries — never
- * `client.models.*`. That is not a style preference: the models carry no guest
- * authorization at all, so a direct model read from a public page would fail,
- * loudly, which is exactly the behaviour we want if someone tries.
+ * `client.models.*`. That is not a style preference: the `Article` model
+ * carries no API-key authorization at all, so a direct model read from a
+ * public page would fail loudly, which is exactly the behaviour we want if
+ * someone tries.
  *
  * Each function is wrapped in Next's data cache. Amplify's GraphQL transport
- * intentionally uses uncached fetches; containing those calls here prevents a
- * background ISR refresh from changing a route from static to dynamic.
+ * intentionally uses uncached fetches; containing those calls here is what
+ * stops a background ISR refresh from silently promoting a static route to a
+ * dynamic one.
  */
 
+/**
+ * One feed item.
+ *
+ * Doubly unwrapped on purpose. Amplify generates the items array as
+ * `(PublicArticleCard | null)[]` — GraphQL list elements are nullable unless
+ * the SDL says otherwise — so the inner `NonNullable` is what stops every
+ * consumer from having to null-check a field the resolver always populates.
+ * The runtime filter in `listPublishedArticles` below is what makes that
+ * honest rather than a lie to the type checker.
+ */
 export type ArticleCard = NonNullable<
-  Schema['listPublishedArticles']['returnType']
->['items'][number]
+  NonNullable<Schema['listPublishedArticles']['returnType']>['items'][number]
+>
 
 export type PublicArticle = NonNullable<Schema['getPublishedArticleBySlug']['returnType']>
-export type PublicPoll = NonNullable<Schema['getPublicPoll']['returnType']>
-export type PublicPollCard = NonNullable<Schema['listPublicPolls']['returnType']>['items'][number]
-export type PublicPromise = NonNullable<Schema['getPublicPromise']['returnType']>
-export type PublicComment = NonNullable<
-  Schema['listApprovedComments']['returnType']
->['items'][number]
-export type PublicQuestion = NonNullable<
-  Schema['listApprovedQuestions']['returnType']
->['items'][number]
-export type PublicLiveEvent = NonNullable<
-  Schema['listPublicLiveEvents']['returnType']
->['items'][number]
 
 export type Page<T> = { items: T[]; nextToken: string | null }
 
-/** Hard ceiling on any page size, enforced here as well as in each resolver. */
+/** Hard ceiling on any page size, enforced here as well as in the resolver.
+ *  Two independent clamps because this one is a typo away from being wrong and
+ *  the resolver's is the one that actually protects DynamoDB. */
 const MAX_PAGE = 24
+
 const PUBLIC_AUTH = { authMode: 'apiKey' as const }
 
 function clampLimit(limit: number | undefined, fallback: number): number {
@@ -51,16 +55,22 @@ function clampLimit(limit: number | undefined, fallback: number): number {
  * Unwrap an AppSync response.
  *
  * The Amplify v6 client does NOT throw on a GraphQL error — it returns
- * `{ data: null, errors: [...] }`. Code that only checks `data` silently
- * renders an empty page when the API is failing, so every call goes through
- * here. Errors are logged server-side and surfaced to the caller as null; the
- * page decides whether that is a 404 or an error boundary.
+ * `{ data: null, errors: [...] }`. Code that only checks `data` renders an
+ * empty page while the API is failing, which is indistinguishable from a site
+ * that has published nothing. Every call goes through here so that failure is
+ * at least logged.
+ *
+ * Errors are logged server-side and surfaced to the caller as null. The PAGE
+ * decides what that means — 404 for a missing article, an error state for a
+ * failed feed — because this layer cannot tell the difference.
  */
 function unwrap<T>(
   operation: string,
   result: { data: T | null | undefined; errors?: Array<{ message: string; errorType?: string }> },
 ): T | null {
   if (result.errors?.length) {
+    // Structured, single-line JSON so CloudWatch Logs Insights can query it.
+    // Nothing user-supplied and nothing secret is interpolated.
     console.error(
       JSON.stringify({
         level: 'ERROR',
@@ -82,34 +92,27 @@ const emptyPage = <T>(): Page<T> => ({ items: [], nextToken: null })
  * Cache lifetimes, named for the surface that needs them.
  *
  * Next lowers a route's effective `revalidate` to the SMALLEST value it finds
- * anywhere in that route, including inside `unstable_cache`. Every wrapper in
- * this file hard-coded 60, which silently overrode the longer TTLs the XML
- * routes declare for themselves: /sitemap.xml asks for 3600 and got 60 — sixty
- * times the intended work, four parallel AppSync calls each time — while
- * /feed.xml and /news-sitemap.xml asked for 300 and also got 60. The build
- * output in .next/prerender-manifest.json showed 60 for all of them.
+ * anywhere in that route, INCLUDING inside `unstable_cache`. So a single
+ * hard-coded 60 here would silently override the longer TTL /sitemap.xml asks
+ * for, and the sitemap would be regenerated sixty times an hour for nobody.
+ * The TTL is therefore part of the cache key — see `cachedPerTtl`.
  *
  * On Amplify Hosting there is no on-demand ISR, so a TTL is the only freshness
- * lever there is, and spending it on a sitemap nobody reads sixty times an hour
- * is pure cost.
+ * lever that exists. `page: 60` is what makes "publish an article and it
+ * appears on the feed" true within a minute.
  */
 export const TTL = {
-  /** Reader-facing pages: a story must appear within a minute of publishing. */
+  /** Reader-facing pages. */
   page: 60,
-  /** Syndication and slow-changing pages. Feed readers poll on their own schedule. */
-  slow: 300,
-  /** Sitemaps. Crawlers re-fetch on their own cadence; freshness is cheap here. */
+  /** Sitemaps. Crawlers re-fetch on their own cadence; freshness is cheap. */
   sitemap: 3600,
 } as const
 
 /**
  * Build one cached variant of a loader per TTL, each with its own cache entry.
  *
- * The TTL is part of the cache key deliberately. A single shared entry cannot
- * serve both a 60-second page and a 3600-second sitemap — whichever TTL is
- * lower wins for everyone, which is precisely the bug described above. Paying
- * for a second entry is what buys the homepage its one-minute freshness while
- * letting the sitemap actually honour the hour it asks for.
+ * Paying for a second cache entry is what buys the homepage its one-minute
+ * freshness while letting the sitemap actually honour the hour it asks for.
  */
 function cachedPerTtl<A extends unknown[], R>(key: string, loader: (...args: A) => Promise<R>) {
   return (ttl: number) => unstable_cache(loader, [key, String(ttl)], { revalidate: ttl })
@@ -117,19 +120,10 @@ function cachedPerTtl<A extends unknown[], R>(key: string, loader: (...args: A) 
 
 const publishedArticlesFor = cachedPerTtl(
   'public-list-published-articles',
-  async (
-    options: {
-      language?: string
-      contentType?: string
-      limit?: number
-      nextToken?: string
-    } = {},
-  ): Promise<Page<ArticleCard>> => {
+  async (options: { limit?: number; nextToken?: string } = {}): Promise<Page<ArticleCard>> => {
     const client = publicServerClient()
     const result = await client.queries.listPublishedArticles(
       {
-        language: options.language ?? 'HI',
-        contentType: options.contentType ?? null,
         limit: clampLimit(options.limit, 12),
         nextToken: options.nextToken ?? null,
       },
@@ -138,294 +132,40 @@ const publishedArticlesFor = cachedPerTtl(
 
     const data = unwrap('listPublishedArticles', result)
     if (!data) return emptyPage<ArticleCard>()
-    return { items: data.items ?? [], nextToken: data.nextToken ?? null }
+    return {
+      // The resolver guarantees a non-null array, but the generated type is
+      // nullable and a null here would crash the page rather than empty it.
+      items: (data.items ?? []).filter((item): item is ArticleCard => item !== null),
+      nextToken: data.nextToken ?? null,
+    }
   },
 )
 
+/** The homepage feed. */
 export const listPublishedArticles = publishedArticlesFor(TTL.page)
-/** For /feed.xml and /news-sitemap.xml, which declare `revalidate = 300`. */
-export const listPublishedArticlesSlow = publishedArticlesFor(TTL.slow)
 /** For /sitemap.xml, which declares `revalidate = 3600`. */
 export const listPublishedArticlesHourly = publishedArticlesFor(TTL.sitemap)
 
-export const listArticlesByCategory = unstable_cache(
-  async (
-    categoryId: string,
-    options: { language?: string; limit?: number; nextToken?: string } = {},
-  ): Promise<Page<ArticleCard>> => {
-    const client = publicServerClient()
-    const result = await client.queries.listPublishedArticlesByCategory(
-      {
-        categoryId,
-        language: options.language ?? 'HI',
-        limit: clampLimit(options.limit, 12),
-        nextToken: options.nextToken ?? null,
-      },
-      PUBLIC_AUTH,
-    )
-
-    const data = unwrap('listPublishedArticlesByCategory', result)
-    if (!data) return emptyPage<ArticleCard>()
-    return { items: data.items ?? [], nextToken: data.nextToken ?? null }
-  },
-  ['public-list-articles-by-category'],
-  { revalidate: 60 },
-)
-
-export const listArticlesByTag = unstable_cache(
-  async (
-    tagId: string,
-    options: { language?: string; limit?: number; nextToken?: string } = {},
-  ): Promise<Page<ArticleCard>> => {
-    const client = publicServerClient()
-    const result = await client.queries.listPublishedArticlesByTag(
-      {
-        tagId,
-        language: options.language ?? 'HI',
-        limit: clampLimit(options.limit, 12),
-        nextToken: options.nextToken ?? null,
-      },
-      PUBLIC_AUTH,
-    )
-
-    const data = unwrap('listPublishedArticlesByTag', result)
-    if (!data) return emptyPage<ArticleCard>()
-    return { items: data.items ?? [], nextToken: data.nextToken ?? null }
-  },
-  ['public-list-articles-by-tag'],
-  { revalidate: 60 },
-)
-
-/**
- * A single published article by slug.
- *
- * Returns null for a draft, an unpublished article, or a slug that does not
- * exist — the resolver makes those three cases indistinguishable on purpose,
- * so a 404 leaks nothing about what is in the pipeline.
- */
-export const getArticleBySlug = unstable_cache(
+const publishedArticleFor = cachedPerTtl(
+  'public-get-published-article',
   async (slug: string): Promise<PublicArticle | null> => {
     const client = publicServerClient()
     const result = await client.queries.getPublishedArticleBySlug({ slug }, PUBLIC_AUTH)
+
+    /**
+     * A draft and a genuinely missing article both arrive here as a NotFound
+     * error — the resolver returns the same thing for both on purpose, so an
+     * unpublished headline cannot be confirmed by probing. `unwrap` logs it and
+     * returns null, and the page turns null into a 404.
+     *
+     * That means a real backend outage also renders as 404 rather than as an
+     * error page. The trade is deliberate: the alternative is distinguishing
+     * them in the response, which re-creates the enumeration oracle. The
+     * CloudWatch log line is where an outage is diagnosed.
+     */
     return unwrap('getPublishedArticleBySlug', result)
   },
-  ['public-article-by-slug'],
-  { revalidate: 60 },
 )
 
-export const getPoll = unstable_cache(
-  async (pollId: string): Promise<PublicPoll | null> => {
-    const client = publicServerClient()
-    const result = await client.queries.getPublicPoll({ pollId }, PUBLIC_AUTH)
-    return unwrap('getPublicPoll', result)
-  },
-  ['public-poll-by-id'],
-  { revalidate: 60 },
-)
-
-export const listPolls = unstable_cache(
-  async (
-    options: { status?: string; limit?: number; nextToken?: string } = {},
-  ): Promise<Page<PublicPollCard>> => {
-    const result = await publicServerClient().queries.listPublicPolls(
-      {
-        status: options.status ?? 'OPEN',
-        limit: clampLimit(options.limit, 12),
-        nextToken: options.nextToken ?? null,
-      },
-      PUBLIC_AUTH,
-    )
-    const data = unwrap('listPublicPolls', result)
-    if (!data) return emptyPage<PublicPollCard>()
-    return { items: data.items ?? [], nextToken: data.nextToken ?? null }
-  },
-  ['public-list-polls'],
-  { revalidate: 60 },
-)
-
-const promisesFor = cachedPerTtl(
-  'public-list-promises',
-  async (
-    options: { language?: string; limit?: number; nextToken?: string } = {},
-  ): Promise<Page<PublicPromise>> => {
-    const result = await publicServerClient().queries.listPublicPromises(
-      {
-        language: options.language ?? 'HI',
-        limit: clampLimit(options.limit, 12),
-        nextToken: options.nextToken ?? null,
-      },
-      PUBLIC_AUTH,
-    )
-    const data = unwrap('listPublicPromises', result)
-    if (!data) return emptyPage<PublicPromise>()
-    return { items: data.items ?? [], nextToken: data.nextToken ?? null }
-  },
-)
-
-export const listPromises = promisesFor(TTL.page)
-/** For /promises and /promises/[slug], which declare `revalidate = 300`. */
-export const listPromisesSlow = promisesFor(TTL.slow)
-/** For /sitemap.xml, which declares `revalidate = 3600`. */
-export const listPromisesHourly = promisesFor(TTL.sitemap)
-
-const promiseBySlugFor = cachedPerTtl(
-  'public-promise-by-slug',
-  async (slug: string): Promise<PublicPromise | null> => {
-    const result = await publicServerClient().queries.getPublicPromise({ slug }, PUBLIC_AUTH)
-    return unwrap('getPublicPromise', result)
-  },
-)
-
-/** For /promises/[slug], which declares `revalidate = 300`. */
-export const getPromise = promiseBySlugFor(TTL.slow)
-
-export const listApprovedComments = unstable_cache(
-  async (
-    articleId: string,
-    options: { limit?: number; nextToken?: string } = {},
-  ): Promise<Page<PublicComment>> => {
-    const client = publicServerClient()
-    const result = await client.queries.listApprovedComments(
-      {
-        articleId,
-        limit: clampLimit(options.limit, 20),
-        nextToken: options.nextToken ?? null,
-      },
-      PUBLIC_AUTH,
-    )
-
-    const data = unwrap('listApprovedComments', result)
-    if (!data) return emptyPage<PublicComment>()
-    return { items: data.items ?? [], nextToken: data.nextToken ?? null }
-  },
-  ['public-list-approved-comments'],
-  { revalidate: 60 },
-)
-
-export const listApprovedQuestions = unstable_cache(
-  async (
-    options: { scope?: string; limit?: number; nextToken?: string } = {},
-  ): Promise<Page<PublicQuestion>> => {
-    const client = publicServerClient()
-    const result = await client.queries.listApprovedQuestions(
-      {
-        scope: options.scope ?? 'GLOBAL',
-        limit: clampLimit(options.limit, 20),
-        nextToken: options.nextToken ?? null,
-      },
-      PUBLIC_AUTH,
-    )
-
-    const data = unwrap('listApprovedQuestions', result)
-    if (!data) return emptyPage<PublicQuestion>()
-    return { items: data.items ?? [], nextToken: data.nextToken ?? null }
-  },
-  ['public-list-approved-questions'],
-  { revalidate: 60 },
-)
-
-export const listLiveEvents = unstable_cache(
-  async (
-    options: { language?: string; limit?: number; nextToken?: string } = {},
-  ): Promise<Page<PublicLiveEvent>> => {
-    const client = publicServerClient()
-    const result = await client.queries.listPublicLiveEvents(
-      {
-        language: options.language ?? 'HI',
-        limit: clampLimit(options.limit, 10),
-        nextToken: options.nextToken ?? null,
-      },
-      PUBLIC_AUTH,
-    )
-
-    const data = unwrap('listPublicLiveEvents', result)
-    if (!data) return emptyPage<PublicLiveEvent>()
-    return { items: data.items ?? [], nextToken: data.nextToken ?? null }
-  },
-  ['public-list-live-events'],
-  { revalidate: 60 },
-)
-
-/**
- * Public site settings: the breaking-news strip and featured content.
- *
- * The resolver hard-codes the PUBLIC visibility partition, so an INTERNAL
- * setting — moderation thresholds, banned-word lists — cannot be reached here
- * even by guessing its key.
- */
-export const getSiteSettings = unstable_cache(
-  async (): Promise<Record<string, unknown>> => {
-    const client = publicServerClient()
-    const result = await client.queries.getPublicSiteSettings(PUBLIC_AUTH)
-    const data = unwrap('getPublicSiteSettings', result)
-    if (!data) return {}
-
-    const settings: Record<string, unknown> = {}
-    for (const entry of data) {
-      if (entry?.settingKey) settings[entry.settingKey] = entry.valueJson
-    }
-    return settings
-  },
-  ['public-site-settings'],
-  { revalidate: 60 },
-)
-
-/**
- * Categories and tags are ordinary model reads: they carry no draft state and
- * no PII, so they are the one model class with a direct guest read rule.
- */
-const categoriesFor = cachedPerTtl('public-list-categories', async () => {
-  const client = publicServerClient()
-  const result = await client.models.Category.list({
-    filter: { isActive: { eq: true } },
-    limit: 50,
-    ...PUBLIC_AUTH,
-  })
-  return unwrap('listCategories', result) ?? []
-})
-
-export const listCategories = categoriesFor(TTL.page)
-/** For /sitemap.xml, which declares `revalidate = 3600`. */
-export const listCategoriesHourly = categoriesFor(TTL.sitemap)
-
-export const getCategoryBySlug = unstable_cache(
-  async (slug: string) => {
-    const client = publicServerClient()
-    const result = await client.models.Category.categoryBySlug(
-      { slug },
-      { limit: 1, ...PUBLIC_AUTH },
-    )
-    const data = unwrap('categoryBySlug', result)
-    return data?.[0] ?? null
-  },
-  ['public-category-by-slug'],
-  { revalidate: 60 },
-)
-
-export const getTagBySlug = unstable_cache(
-  async (slug: string) => {
-    const client = publicServerClient()
-    const result = await client.models.Tag.tagBySlug({ slug }, { limit: 1, ...PUBLIC_AUTH })
-    const data = unwrap('tagBySlug', result)
-    return data?.[0] ?? null
-  },
-  ['public-tag-by-slug'],
-  { revalidate: 60 },
-)
-
-/**
- * Where a renamed slug now points.
- *
- * Redirect rows exist only for published articles, so a direct model read is
- * safe here and saves a resolver on the 404 path.
- */
-export const getSlugRedirect = unstable_cache(
-  async (fromSlug: string): Promise<string | null> => {
-    const client = publicServerClient()
-    const result = await client.models.ArticleRedirect.get({ fromSlug }, PUBLIC_AUTH)
-    const data = unwrap('getSlugRedirect', result)
-    return data?.toSlug ?? null
-  },
-  ['public-slug-redirect'],
-  { revalidate: 60 },
-)
+export const getPublishedArticle = publishedArticleFor(TTL.page)
+export const getPublishedArticleHourly = publishedArticleFor(TTL.sitemap)
