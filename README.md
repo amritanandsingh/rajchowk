@@ -178,6 +178,58 @@ npm run admin -- --revoke --email you@example.com   # refuses to remove the last
 
 Creating an account grants **no capability at all** until `--grant` runs — an authenticated Cognito user with no group cannot read a draft or publish anything. After a group change, sign out and back in: Cognito issues the `cognito:groups` claim at sign-in, so an existing session will not see it.
 
+### `--bootstrap`, for a preview branch or sandbox
+
+Cognito's invitation email is sent from `no-reply@verificationemail.com` and routinely lands in spam, which is the usual reason a first sign-in stalls. On a throwaway environment that is pure friction, so:
+
+```bash
+npm run admin -- --bootstrap --email you@example.com
+```
+
+It creates the account with `MessageAction: SUPPRESS` (**no email at all**), generates a 20-character password satisfying the pool policy, sets it as _permanent_ so there is no change-password challenge, grants `ADMIN`, and prints the password **once**.
+
+The trade is explicit: that password is written to stdout, so it lives in your terminal scrollback. **Use `--create` for anything that matters** — it is the only path where the password never touches this machine. `--bootstrap` also refuses to run against a pool that already has an administrator unless you pass `--yes`, so it cannot be used to quietly reset a colleague's account.
+
+To target a pool other than the one in `amplify_outputs.json` — a deployed branch, say, when your local outputs point at a sandbox — name it explicitly:
+
+```bash
+npm run admin -- --bootstrap --email you@example.com \
+  --user-pool-id ap-south-1_XXXXXXXXX --region ap-south-1 --yes
+```
+
+Find a branch's pool id with:
+
+```bash
+aws cloudformation describe-stacks --region ap-south-1 \
+  --stack-name amplify-<appId>-<branch>-branch-<hash> \
+  --query 'Stacks[0].Outputs[?OutputKey==`userPoolId`].OutputValue' --output text
+```
+
+---
+
+## Writing and publishing an article
+
+The admin UI is **Hindi-only** by design, so the labels are worth having to hand.
+
+| Step | Where                               | What                                                                   |
+| ---- | ----------------------------------- | ---------------------------------------------------------------------- |
+| 1    | `/admin/login`                      | **ईमेल** = email, **पासवर्ड** = password, then **साइन इन करें**        |
+| 2    | `/admin`                            | Dashboard: **ड्राफ़्ट** (drafts) above, **प्रकाशित** (published) below |
+| 3    | **नया लेख** → `/admin/articles/new` | The create form                                                        |
+
+On the form:
+
+- **शीर्षक** — headline (4–300 characters)
+- **सारांश** — summary shown on the feed (10–600)
+- **लेख** — the body, in **Markdown**: `## subheading`, `**bold**`, `- list item`, `[text](https://…)`
+- **URL (वैकल्पिक)** — optional slug. Left blank it is derived from the headline; a purely Devanagari headline has no ASCII form, so it becomes `lekh-<8 hex>`. Type something here for a readable URL — and note the slug is **permanent**, since changing it would break every inbound link.
+
+Then either **ड्राफ़्ट सहेजें** (save a draft — visible under ड्राफ़्ट, _not_ on the public feed) or **सहेजें और प्रकाशित करें** (save and publish in one step).
+
+From the dashboard: **प्रकाशित करें** publishes a draft, **फ़ीड से हटाएँ** unpublishes, **संपादित करें** edits.
+
+> **A published article takes up to 60 seconds to appear on `/`.** That is the ISR window (`revalidate = 60` in `src/app/(public)/page.tsx`) — Amplify Hosting has no on-demand invalidation, so a TTL is the only freshness mechanism there is. The article is reachable at `/article/<slug>` immediately.
+
 ---
 
 ## Environment variables
