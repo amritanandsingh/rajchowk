@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import { browserDataClient, readableAmplifyError } from '@/lib/amplify/browser-client'
+import { guestDataClient, readableAmplifyError } from '@/lib/amplify/browser-client'
 
 export function NewsletterTokenAction({
   action,
@@ -19,8 +19,8 @@ export function NewsletterTokenAction({
       try {
         const response =
           action === 'verify'
-            ? await browserDataClient.mutations.newsletterVerify({ id, token })
-            : await browserDataClient.mutations.newsletterUnsubscribe({ id, signature: token })
+            ? await guestDataClient.mutations.newsletterVerify({ id, token })
+            : await guestDataClient.mutations.newsletterUnsubscribe({ id, signature: token })
         if (response.errors?.length) throw new Error(response.errors[0]?.message)
         setMessage(
           response.data?.ok

@@ -53,6 +53,29 @@ const backend = defineBackend({
  */
 const branch = process.env.AWS_BRANCH
 const isProduction = branch === 'main' || branch === 'production'
+
+/**
+ * Security hardening, separated from durability.
+ *
+ * `isProduction` governs two unrelated concerns that were previously fused:
+ * DURABILITY (deletion protection, RemovalPolicy.RETAIN, CloudWatch alarms) and
+ * SECURITY (Cognito advanced security, AppSync introspection, which auth flows
+ * exist). Durability must stay strictly branch-gated — a throwaway branch stack
+ * with RETAIN on 25 tables is a mess nobody wants to clean up.
+ *
+ * Security is different: it is exactly what you want to rehearse before merging.
+ * Because the flags were fused, three production behaviours could never be
+ * exercised on any branch, which is the largest remaining local↔prod parity gap.
+ * `FORCE_SECURITY_HARDENING=1` closes it for a pre-merge run.
+ *
+ * TRADEOFF, and it is deliberate: turning this on removes
+ * ALLOW_ADMIN_USER_PASSWORD_AUTH, so `npm run test:integration` and
+ * `npm run verify:backend` stop working on that branch — which is precisely the
+ * condition they already cannot run under against production. Use two passes:
+ * integration tests with hardening off, then redeploy with it on and run only
+ * the HTTP/browser layer (`npm run verify:parity`, `npm run e2e:live`).
+ */
+const hardenSecurity = isProduction || process.env.FORCE_SECURITY_HARDENING === '1'
 const stack = Stack.of(backend.data)
 const { region, account } = stack
 
@@ -74,14 +97,16 @@ cfnUserPool.policies = {
 }
 cfnUserPool.deletionProtection = isProduction ? 'ACTIVE' : 'INACTIVE'
 
-if (isProduction) {
-  // Blocks credential stuffing against staff accounts. Costs extra per MAU,
-  // so production only.
+if (hardenSecurity) {
+  // Blocks credential stuffing against staff accounts. Costs extra per MAU, so
+  // it is not on by default outside production — but it CAN change sign-in
+  // behaviour (adaptive risk challenges from an unfamiliar IP), which is why
+  // FORCE_SECURITY_HARDENING exists to rehearse it before merging.
   cfnUserPool.userPoolAddOns = { advancedSecurityMode: 'ENFORCED' }
 }
 
 /**
- * Enable the admin username/password auth flow OUTSIDE production only.
+ * Enable the admin username/password auth flow only where it is NOT hardened.
  *
  * The integration test suite mints one Cognito ID token per role so several
  * principals can be in flight inside a single Node process — `aws-amplify` keeps
@@ -92,8 +117,12 @@ if (isProduction) {
  * credentials, so it is not an end-user attack surface. It is still withheld
  * from production on the principle that a capability nothing needs should not
  * exist there.
+ *
+ * Gated on `hardenSecurity`, not `isProduction`: a branch deployed with
+ * FORCE_SECURITY_HARDENING=1 is meant to be indistinguishable from production
+ * here, and that necessarily includes losing this flow.
  */
-if (!isProduction) {
+if (!hardenSecurity) {
   const cfnUserPoolClient = backend.auth.resources.cfnResources.cfnUserPoolClient
   cfnUserPoolClient.explicitAuthFlows = [
     'ALLOW_USER_SRP_AUTH',
@@ -110,7 +139,7 @@ const cfnApi = backend.data.resources.cfnResources.cfnGraphqlApi
 // which is the cheapest denial-of-service against a GraphQL API.
 cfnApi.queryDepthLimit = 6
 cfnApi.resolverCountLimit = 100
-if (isProduction) {
+if (hardenSecurity) {
   cfnApi.introspectionConfig = 'DISABLED'
 }
 
@@ -381,7 +410,21 @@ for (const fn of RATE_LIMITED_FUNCTIONS) {
 const SES_DOMAIN = process.env.SES_DOMAIN ?? 'rajchowk.in'
 const SES_FROM_ADDRESS = process.env.SES_FROM_ADDRESS ?? `news@${SES_DOMAIN}`
 const SES_CONFIGURATION_SET = process.env.SES_CONFIGURATION_SET ?? 'rajchowk-transactional'
-const SITE_URL = isProduction ? `https://${SES_DOMAIN}` : 'http://localhost:3000'
+/**
+ * Origin baked into newsletter verify/unsubscribe links by the Lambdas.
+ *
+ * The explicit SITE_URL override exists because the previous expression had no
+ * middle ground: production got https://$SES_DOMAIN and *everything else* got
+ * http://localhost:3000 — including a deployed preview branch, whose subscribers
+ * then received confirmation emails pointing at a localhost that is not theirs
+ * and cannot work. A deployed branch needs to advertise its own origin.
+ *
+ * Set SITE_URL in the Amplify Console for any non-production branch. Production
+ * leaves it unset and keeps deriving from SES_DOMAIN, so main's behaviour is
+ * unchanged.
+ */
+const SITE_URL =
+  process.env.SITE_URL ?? (isProduction ? `https://${SES_DOMAIN}` : 'http://localhost:3000')
 
 for (const fn of [backend.newsletterSubscribe, backend.newsletterVerify]) {
   fn.addEnvironment('SITE_URL', SITE_URL)

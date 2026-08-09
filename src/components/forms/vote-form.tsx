@@ -5,7 +5,7 @@ import { useState, type FormEvent } from 'react'
 import type { PublicPoll } from '@/lib/amplify/queries'
 import { useAnnounce, useDictionary } from '@/components/providers'
 import { Button } from '@/components/ui/button'
-import { browserDataClient, readableAmplifyError } from '@/lib/amplify/browser-client'
+import { userPoolDataClient, readableAmplifyError } from '@/lib/amplify/browser-client'
 import { interpolate } from '@/lib/format'
 import { TextArea } from './form-field'
 
@@ -25,7 +25,7 @@ export function VoteForm({ poll }: { poll: PublicPoll }) {
     const form = new FormData(event.currentTarget)
     setLoading(true)
     try {
-      const response = await browserDataClient.mutations.castVote({
+      const response = await userPoolDataClient.mutations.castVote({
         pollId: poll.id,
         pollOptionId: selected,
         explanation: String(form.get('explanation') ?? '').trim() || null,

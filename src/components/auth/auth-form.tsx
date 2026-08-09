@@ -6,6 +6,7 @@ import { confirmSignUp, resendSignUpCode, signIn, signUp } from 'aws-amplify/aut
 import { useState, type FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { readableAmplifyError } from '@/lib/amplify/browser-client'
+import { ensureUserProfile } from '@/lib/amplify/ensure-profile'
 import { FormField, TextInput } from '@/components/forms/form-field'
 
 type Mode = 'sign-in' | 'sign-up' | 'confirm'
@@ -53,6 +54,20 @@ export function AuthForm({ mode }: { mode: Mode }) {
         }
         if (!result.isSignedIn) {
           setMessage('साइन-इन पूरा करने के लिए अगला सत्यापन चरण आवश्यक है।')
+          return
+        }
+        // Nothing in the product created a UserProfile row, so members were
+        // refused (FORBIDDEN) the first time they tried to ask a question or
+        // comment. Sign-in is the earliest point with a verified session, and it
+        // also backfills members who registered before this shipped.
+        //
+        // A failure here must not strand the user on the sign-in form — they ARE
+        // signed in by this point. But it must not be silent either, or we
+        // recreate the bug we are fixing, so it is surfaced and navigation is
+        // skipped so the message stays visible.
+        const profileError = await ensureUserProfile()
+        if (profileError) {
+          setMessage(`साइन-इन हो गया, पर प्रोफ़ाइल तैयार नहीं हो सकी: ${profileError}`)
           return
         }
         router.push(params.get('next') || '/account')

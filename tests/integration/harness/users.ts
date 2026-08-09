@@ -35,7 +35,12 @@ const cognito = new CognitoIdentityProviderClient({ region: region() })
 
 /** A domain that cannot receive mail, so nothing can escape to a real inbox. */
 const EMAIL_DOMAIN = process.env.E2E_EMAIL_DOMAIN ?? 'e2e.rajchowk.test'
-const PASSWORD = process.env.E2E_TEST_PASSWORD ?? 'IntegrationTest!2026-Rc'
+/**
+ * Exported because the browser suite (e2e/live/) signs these same users in
+ * through the real UI. Duplicating the literal there would let the two drift and
+ * produce a sign-in failure that looks like an auth bug.
+ */
+export const PASSWORD = process.env.E2E_TEST_PASSWORD ?? 'IntegrationTest!2026-Rc'
 
 export const usernameFor = (role: Role, runId: string): string =>
   `it-${runId}-${role.toLowerCase()}@${EMAIL_DOMAIN}`
