@@ -1,80 +1,37 @@
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import type { NextConfig } from 'next'
 
 /**
- * `amplify_outputs.json` is gitignored and produced by `ampx sandbox` /
- * `ampx pipeline-deploy`. Reading it here lets image `remotePatterns` be scoped
- * to OUR media bucket. A wildcard would let anyone proxy arbitrary remote
- * objects through the image optimizer.
- */
-type AmplifyOutputs = {
-  storage?: { bucket_name?: string; aws_region?: string }
-}
-
-function readAmplifyOutputs(): AmplifyOutputs {
-  const path = join(process.cwd(), 'amplify_outputs.json')
-  if (!existsSync(path)) return {}
-  try {
-    return JSON.parse(readFileSync(path, 'utf8')) as AmplifyOutputs
-  } catch {
-    return {}
-  }
-}
-
-const outputs = readAmplifyOutputs()
-const bucket = outputs.storage?.bucket_name ?? process.env.NEXT_PUBLIC_MEDIA_BUCKET
-const region = outputs.storage?.aws_region ?? process.env.NEXT_PUBLIC_AWS_REGION ?? 'ap-south-1'
-
-const remotePatterns: NonNullable<NextConfig['images']>['remotePatterns'] = [
-  // YouTube thumbnails for the click-to-load embed facade.
-  { protocol: 'https', hostname: 'i.ytimg.com', pathname: '/vi/**' },
-  { protocol: 'https', hostname: 'img.youtube.com', pathname: '/vi/**' },
-]
-
-if (bucket) {
-  remotePatterns.push(
-    { protocol: 'https', hostname: `${bucket}.s3.${region}.amazonaws.com`, pathname: '/media/**' },
-    { protocol: 'https', hostname: `${bucket}.s3.amazonaws.com`, pathname: '/media/**' },
-  )
-}
-
-if (process.env.NEXT_PUBLIC_MEDIA_CDN_HOST) {
-  remotePatterns.push({
-    protocol: 'https',
-    hostname: process.env.NEXT_PUBLIC_MEDIA_CDN_HOST,
-    pathname: '/**',
-  })
-}
-
-/**
- * Public pages are statically generated / ISR, so they cannot carry a per-request
- * nonce (a nonce forces dynamic rendering, which would disable ISR site-wide and
- * is the single most expensive thing we could do on Amplify Hosting compute).
+ * Content Security Policy.
  *
- * All routes therefore use this static policy. Sensitive operations remain
- * protected at the Cognito/AppSync authorization boundary, and private routes
- * also receive noindex headers. See docs/architecture.md.
+ * Public pages are statically generated / ISR, so they CANNOT carry a
+ * per-request nonce: a nonce forces dynamic rendering, which would disable ISR
+ * site-wide and is the single most expensive change this app could make on
+ * Amplify Hosting compute. All routes therefore share this static policy.
+ *
+ * `'unsafe-inline'` in script-src is not a shrug. Next streams the RSC payload
+ * as inline `self.__next_f.push()` calls whose hashes change on every render,
+ * so a hash-based policy is not expressible for an App Router app. The
+ * compensating controls are the ones that actually carry the load here: no
+ * `dangerouslySetInnerHTML` anywhere on the content path (ESLint-enforced),
+ * Markdown sanitised on the hast tree, and Trusted Types in report-only below.
  */
-const PUBLIC_CSP = [
+const CSP = [
   "default-src 'self'",
-  // 'unsafe-inline' is required: Next streams the RSC payload as inline
-  // self.__next_f.push() calls whose hashes change every render.
-  // Trusted Types (report-only, below) is the compensating control.
   process.env.NODE_ENV === 'development'
     ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
     : "script-src 'self' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https:",
+  "img-src 'self' data: blob:",
   "font-src 'self' data:",
-  "connect-src 'self' https://*.amazonaws.com https://*.amazoncognito.com wss://*.amazonaws.com",
-  // The only third-party frame we ever mount, and only after a user click.
-  'frame-src https://www.youtube-nocookie.com',
+  // Cognito and AppSync. Scoped to AWS hosts rather than '*' so a compromised
+  // script cannot exfiltrate to an arbitrary origin.
+  "connect-src 'self' https://*.amazonaws.com https://*.amazoncognito.com",
   "media-src 'self'",
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
   "frame-ancestors 'none'",
+  "frame-src 'none'",
   'upgrade-insecure-requests',
 ].join('; ')
 
@@ -87,7 +44,6 @@ const SECURITY_HEADERS = [
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'X-Frame-Options', value: 'DENY' },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-  { key: 'X-DNS-Prefetch-Control', value: 'on' },
   { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
   {
     key: 'Permissions-Policy',
@@ -95,11 +51,10 @@ const SECURITY_HEADERS = [
       'camera=(), microphone=(), geolocation=(), payment=(), usb=(), ' +
       'magnetometer=(), gyroscope=(), interest-cohort=()',
   },
-  {
-    key: 'Strict-Transport-Security',
-    value: 'max-age=63072000; includeSubDomains; preload',
-  },
-  { key: 'Content-Security-Policy', value: PUBLIC_CSP },
+  // Two years, with preload. Amplify Hosting terminates TLS and redirects
+  // http->https, so there is no plaintext origin this could lock anyone out of.
+  { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
+  { key: 'Content-Security-Policy', value: CSP },
   { key: 'Content-Security-Policy-Report-Only', value: TRUSTED_TYPES_REPORT_ONLY },
 ]
 
@@ -110,52 +65,30 @@ const nextConfig: NextConfig = {
   // Next infers the workspace root from the nearest lockfile and walks upward.
   // A stray lockfile anywhere above the project (a developer's home directory,
   // or the Amplify build container) makes it trace the deployment bundle from
-  // the wrong root. Pin it. `next build` always runs from the project root.
+  // the wrong root. Pin it — `next build` always runs from the project root.
   outputFileTracingRoot: process.cwd(),
 
   // NEVER set `distDir` — Amplify Hosting requires build artifacts in `.next`.
   // NEVER set `output: 'standalone' | 'export'` — Amplify's SSR adapter builds
   // its own deployment bundle from the default `.next` output.
 
-  experimental: {
-    // Rewrites `import { Menu } from 'lucide-react'` to a direct per-icon path
-    // so the barrel's module graph is never walked. 12 files import from it and
-    // the whole icon set currently lands in one shared chunk; this trims that
-    // chunk to the icons actually referenced and cuts cold-build work.
-    optimizePackageImports: ['lucide-react'],
-  },
-
   eslint: {
     // Linting runs explicitly in `npm run verify` and in amplify.yml. Leaving
-    // this false would make `next build` invoke the deprecated `next lint` path.
+    // this false would make `next build` invoke the deprecated `next lint`.
     ignoreDuringBuilds: true,
   },
   typescript: {
     ignoreBuildErrors: false,
   },
 
-  images: {
-    remotePatterns,
-    formats: ['image/avif', 'image/webp'],
-    // Sized for the Indian mobile market first.
-    deviceSizes: [360, 414, 640, 750, 828, 1080, 1200, 1920],
-    imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
-    minimumCacheTTL: 60 * 60 * 24 * 7,
-    dangerouslyAllowSVG: false,
-    contentDispositionType: 'attachment',
-  },
-
   async headers() {
     return [
       { source: '/:path*', headers: SECURITY_HEADERS },
       {
-        // Defence in depth: robots.ts disallow alone leaks URLs and does not
-        // deindex. The header does.
-        source: '/:path(admin|account|auth|preview)/:rest*',
-        headers: [{ key: 'X-Robots-Tag', value: 'noindex, nofollow' }],
-      },
-      {
-        source: '/api/:path*',
+        // Defence in depth: a robots.txt disallow leaks URLs and does not
+        // deindex. The header does. It also cannot be forgotten on a new page
+        // the way a `metadata.robots` export can.
+        source: '/admin/:path*',
         headers: [
           { key: 'X-Robots-Tag', value: 'noindex, nofollow' },
           { key: 'Cache-Control', value: 'no-store' },

@@ -1,147 +1,100 @@
 /**
- * Article publishing state machine.
+ * The publishing state machine.
  *
- * Pure module — shared with the Lambdas in amplify/, so no React, no next/*,
- * no DOM globals, no `@/` aliases.
+ * Pure module: imported by the Lambdas in amplify/ by relative path, so no
+ * React, no next/*, no DOM globals, no `@/` aliases.
  *
- * The transition table is the single source of truth for what "publishing"
- * means. It is enforced in publish-article/handler.ts with a DynamoDB
- * ConditionExpression on the current status, so two editors acting at the same
- * moment cannot both win.
+ * Two states, as the specification recommends. "Unpublish" returns an article
+ * to DRAFT rather than adding a third state — the reader-visible effect is
+ * identical, and a third state would need its own transition rules and its own
+ * feed semantics for no MVP benefit.
+ *
+ * The transition table below is the SINGLE definition of what may happen. The
+ * admin UI reads it to decide which buttons to offer; the Lambda reads it to
+ * decide what to allow. That is deliberate — when the two disagree you get
+ * either a button that always fails or, worse, a capability the UI hid but the
+ * backend still honours.
  */
 
-export const ARTICLE_STATUSES = [
-  'DRAFT',
-  'IN_REVIEW',
-  'SCHEDULED',
-  'PUBLISHED',
-  'UNPUBLISHED',
-  'ARCHIVED',
-] as const
+export const ARTICLE_STATUS = ['DRAFT', 'PUBLISHED'] as const
+export type ArticleStatus = (typeof ARTICLE_STATUS)[number]
 
-export type ArticleStatus = (typeof ARTICLE_STATUSES)[number]
-
-export const PUBLISH_ACTIONS = [
-  'SUBMIT_FOR_REVIEW',
-  'RETURN_TO_DRAFT',
-  'SCHEDULE',
-  'PUBLISH',
-  'UNPUBLISH',
-  'ARCHIVE',
-  'RESTORE',
-] as const
-
+export const PUBLISH_ACTIONS = ['PUBLISH', 'UNPUBLISH'] as const
 export type PublishAction = (typeof PUBLISH_ACTIONS)[number]
 
-type Transition = {
-  from: readonly ArticleStatus[]
-  to: ArticleStatus
-  /** Only an administrator may perform this transition. */
-  adminOnly: boolean
-}
-
-/**
- * PUBLISH and UNPUBLISH are admin-only by product requirement: an editor
- * prepares content, an administrator decides what goes live. Everything else
- * is available to any staff member.
- */
-const TRANSITIONS: Record<PublishAction, Transition> = {
-  SUBMIT_FOR_REVIEW: { from: ['DRAFT'], to: 'IN_REVIEW', adminOnly: false },
-  RETURN_TO_DRAFT: { from: ['IN_REVIEW', 'SCHEDULED'], to: 'DRAFT', adminOnly: false },
-  SCHEDULE: { from: ['DRAFT', 'IN_REVIEW'], to: 'SCHEDULED', adminOnly: true },
-  PUBLISH: {
-    from: ['DRAFT', 'IN_REVIEW', 'SCHEDULED', 'UNPUBLISHED'],
-    to: 'PUBLISHED',
-    adminOnly: true,
-  },
-  UNPUBLISH: { from: ['PUBLISHED'], to: 'UNPUBLISHED', adminOnly: true },
-  ARCHIVE: { from: ['PUBLISHED', 'UNPUBLISHED', 'DRAFT'], to: 'ARCHIVED', adminOnly: true },
-  RESTORE: { from: ['ARCHIVED'], to: 'DRAFT', adminOnly: true },
-}
-
 export function isArticleStatus(value: unknown): value is ArticleStatus {
-  return typeof value === 'string' && (ARTICLE_STATUSES as readonly string[]).includes(value)
+  return typeof value === 'string' && (ARTICLE_STATUS as readonly string[]).includes(value)
 }
 
 export function isPublishAction(value: unknown): value is PublishAction {
   return typeof value === 'string' && (PUBLISH_ACTIONS as readonly string[]).includes(value)
 }
 
+/**
+ * An article whose `status` attribute is missing is a DRAFT.
+ *
+ * This is not defensive padding — it is a real state. `status` is
+ * Lambda-owned, so it is written by the handler rather than by the create
+ * mutation, and any row that predates a schema change or was written by a
+ * partial failure can legitimately lack it. Reading absent as DRAFT is the
+ * fail-closed direction: an article with no status is never in a feed, because
+ * `feedKey` is only ever set on the same write that sets `status`.
+ */
+export function statusOf(value: unknown): ArticleStatus {
+  return isArticleStatus(value) ? value : 'DRAFT'
+}
+
+/** What each action means, and what it lands on. */
+const TRANSITIONS: Record<PublishAction, { from: readonly ArticleStatus[]; to: ArticleStatus }> = {
+  PUBLISH: { from: ['DRAFT'], to: 'PUBLISHED' },
+  UNPUBLISH: { from: ['PUBLISHED'], to: 'DRAFT' },
+}
+
 export type TransitionCheck =
   | { allowed: true; to: ArticleStatus }
-  | { allowed: false; reason: 'UNKNOWN_ACTION' | 'ILLEGAL_TRANSITION' | 'REQUIRES_ADMIN' }
+  | { allowed: false; reason: 'UNKNOWN_ACTION' | 'ILLEGAL_TRANSITION' }
 
 /**
- * Can `action` be applied to an article currently in `from`?
+ * May `action` be applied to an article currently in `from`?
  *
- * `isAdmin` is derived from the verified Cognito groups, never from an argument.
+ * ILLEGAL_TRANSITION covers the case that actually happens in production: two
+ * admins with the dashboard open, one publishes, the other's stale page still
+ * offers a Publish button. The handler additionally guards the DynamoDB write
+ * on the current status, so the loser of that race fails at the database too
+ * rather than relying on having checked here first.
  */
-export function checkTransition(
-  from: ArticleStatus,
-  action: PublishAction,
-  isAdmin: boolean,
-): TransitionCheck {
+export function checkTransition(from: ArticleStatus, action: string): TransitionCheck {
+  if (!isPublishAction(action)) return { allowed: false, reason: 'UNKNOWN_ACTION' }
+
   const transition = TRANSITIONS[action]
-  if (!transition) return { allowed: false, reason: 'UNKNOWN_ACTION' }
-  if (!transition.from.includes(from)) return { allowed: false, reason: 'ILLEGAL_TRANSITION' }
-  if (transition.adminOnly && !isAdmin) return { allowed: false, reason: 'REQUIRES_ADMIN' }
+  if (!transition.from.includes(from)) {
+    return { allowed: false, reason: 'ILLEGAL_TRANSITION' }
+  }
   return { allowed: true, to: transition.to }
 }
 
-/** Statuses a transition is legal from — used for the DynamoDB
- *  ConditionExpression that makes the check atomic with the write. */
-export function allowedFromStatuses(action: PublishAction): readonly ArticleStatus[] {
-  return TRANSITIONS[action]?.from ?? []
-}
-
-export function requiresAdmin(action: PublishAction): boolean {
-  return TRANSITIONS[action]?.adminOnly ?? true
-}
-
-/** Actions available from a status, for rendering the editor's toolbar. */
-export function availableActions(from: ArticleStatus, isAdmin: boolean): PublishAction[] {
-  return PUBLISH_ACTIONS.filter((action) => checkTransition(from, action, isAdmin).allowed)
+/** The actions the UI should offer for an article in this state. */
+export function availableActions(from: ArticleStatus): PublishAction[] {
+  return PUBLISH_ACTIONS.filter((action) => checkTransition(from, action).allowed)
 }
 
 /**
- * Is this status publicly readable?
+ * The feed partition key for a status — or null, meaning REMOVE the attribute.
  *
- * ARCHIVED is deliberately still public: an archived story has dropped out of
- * the feeds but its URL must keep working, or every inbound link and citation
- * to it breaks. UNPUBLISHED is the status for "pulled, should 404 or redirect".
+ * Returning null rather than a sentinel string is what makes the public feed
+ * index sparse: the handler translates null into a DynamoDB `REMOVE feedKey`,
+ * so an unpublished article has no entry in
+ * `articlesByFeedKeyAndPublishedAt` at all. It is not hidden by a filter, it
+ * is absent from the index.
  */
-export function isPubliclyReadable(status: ArticleStatus): boolean {
-  return status === 'PUBLISHED' || status === 'ARCHIVED'
-}
-
-/** Should this status appear in feeds, sitemaps and the news sitemap? */
-export function appearsInFeeds(status: ArticleStatus): boolean {
-  return status === 'PUBLISHED'
+export function feedKeyFor(status: ArticleStatus): string | null {
+  return status === 'PUBLISHED' ? 'PUBLISHED' : null
 }
 
 /**
- * The sparse GSI partition key for the public feed.
- *
- * Returns null for anything not in a feed, which REMOVES the attribute and
- * therefore removes the row from the index entirely — the article is absent
- * from the feed rather than filtered out of it.
+ * The admin-list partition key. Always present, unlike feedKey — the admin
+ * dashboard has to be able to enumerate drafts.
  */
-export function feedKeyFor(status: ArticleStatus, language: string): string | null {
-  return appearsInFeeds(status) ? `PUBLISHED#${language}` : null
-}
-
-export function categoryFeedKeyFor(
-  status: ArticleStatus,
-  language: string,
-  categoryId: string,
-): string | null {
-  return appearsInFeeds(status) ? `${categoryId}#PUBLISHED#${language}` : null
-}
-
-export function tagFeedKeyFor(
-  status: ArticleStatus,
-  language: string,
-  tagId: string,
-): string | null {
-  return appearsInFeeds(status) ? `${tagId}#PUBLISHED#${language}` : null
+export function statusKeyFor(status: ArticleStatus): string {
+  return status
 }

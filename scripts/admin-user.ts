@@ -1,0 +1,290 @@
+/**
+ * Create an administrator, or grant/revoke the ADMIN group.
+ *
+ * WHY THIS EXISTS AS A SCRIPT AND NOT A FEATURE.
+ *
+ * Roles here are Cognito user-pool GROUPS, not a column on any table.
+ * `amplify/auth/resource.ts` creates ADMIN; every authorization decision —
+ * AppSync's `allow.group('ADMIN')`, the `isAdmin` predicate in the Lambdas,
+ * the middleware — reads the `cognito:groups` claim on the ID token.
+ *
+ * Membership is therefore granted out-of-band, by someone holding AWS
+ * credentials, and that is deliberate rather than an omission: every in-app
+ * path that could grant ADMIN is itself behind `allow.group('ADMIN')`, so the
+ * FIRST administrator cannot be bootstrapped from inside the application. This
+ * script is that out-of-band path.
+ *
+ * It exists rather than a documented `aws cognito-idp` incantation because the
+ * raw command happily targets the wrong pool, does nothing at all for a
+ * misspelled group name, and never shows what the account ended up with.
+ *
+ * NO PASSWORD EVER APPEARS HERE. `--create` asks Cognito to generate a
+ * temporary one and email it; the operator sets a real password at first
+ * sign-in through the CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED flow that
+ * src/components/admin/sign-in-form.tsx implements.
+ *
+ * Usage:
+ *   npm run admin -- --create --email you@example.com
+ *   npm run admin -- --grant  --email you@example.com
+ *   npm run admin -- --list   --email you@example.com
+ *   npm run admin -- --revoke --email you@example.com
+ */
+import { existsSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
+import {
+  AdminAddUserToGroupCommand,
+  AdminCreateUserCommand,
+  AdminGetUserCommand,
+  AdminListGroupsForUserCommand,
+  AdminRemoveUserFromGroupCommand,
+  CognitoIdentityProviderClient,
+  ListUsersInGroupCommand,
+  UsernameExistsException,
+  UserNotFoundException,
+} from '@aws-sdk/client-cognito-identity-provider'
+
+import { GROUP } from '../amplify/functions/shared/identity'
+
+const USAGE = `
+Manage administrators for राज चौक.
+
+  npm run admin -- --create --email <email>    Create the account (Cognito emails a temporary password)
+  npm run admin -- --grant  --email <email>    Add the ADMIN group
+  npm run admin -- --revoke --email <email>    Remove the ADMIN group
+  npm run admin -- --list   --email <email>    Show current groups (makes no writes)
+
+Options
+  --user-pool-id <id>   Target pool. Defaults to the one in amplify_outputs.json.
+  --region <region>     AWS region. Defaults to the region in amplify_outputs.json.
+  --yes                 Confirm a write to an explicitly targeted pool, and override
+                        the last-administrator guard.
+  --help                Print this.
+
+The first administrator needs BOTH --create and --grant: creating an account
+gives it no capability at all until it is put in a group.
+`
+
+/** An error the operator caused or can act on: message only, no stack trace. */
+class CliError extends Error {
+  showUsage: boolean
+  constructor(message: string, showUsage = false) {
+    super(message)
+    this.showUsage = showUsage
+  }
+}
+
+type Args = {
+  action: 'create' | 'grant' | 'revoke' | 'list'
+  email: string
+  userPoolId?: string
+  region?: string
+  yes: boolean
+}
+
+function parseArgs(argv: string[]): Args {
+  if (argv.includes('--help')) throw new CliError('', true)
+
+  const value = (flag: string): string | undefined => {
+    const index = argv.indexOf(flag)
+    return index >= 0 ? argv[index + 1] : undefined
+  }
+
+  const actions = (['create', 'grant', 'revoke', 'list'] as const).filter((action) =>
+    argv.includes(`--${action}`),
+  )
+  if (actions.length === 0)
+    throw new CliError('Pick one of --create, --grant, --revoke, --list.', true)
+  if (actions.length > 1) throw new CliError(`Pick ONE action, not ${actions.join(' and ')}.`, true)
+
+  const email = value('--email')?.trim()
+  if (!email) throw new CliError('--email is required.', true)
+  // Not a validation library — just enough to catch a transposed flag before
+  // it becomes a Cognito username.
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new CliError(`"${email}" does not look like an email address.`)
+  }
+
+  return {
+    action: actions[0]!,
+    email,
+    ...(value('--user-pool-id') ? { userPoolId: value('--user-pool-id')! } : {}),
+    ...(value('--region') ? { region: value('--region')! } : {}),
+    yes: argv.includes('--yes'),
+  }
+}
+
+/**
+ * Resolve the target pool.
+ *
+ * Reading amplify_outputs.json is the safe default — it is the pool the local
+ * checkout is actually pointed at. An explicitly named pool requires --yes,
+ * because typing a pool id by hand is exactly when someone grants admin on
+ * production while meaning to do it on a sandbox.
+ */
+function resolvePool(args: Args): { userPoolId: string; region: string; explicit: boolean } {
+  if (args.userPoolId) {
+    if (!args.region) throw new CliError('--region is required alongside --user-pool-id.')
+    if (!args.yes) {
+      throw new CliError(
+        `Refusing to target pool ${args.userPoolId} without --yes.\n` +
+          'An explicitly named pool is not the one this checkout is configured for.',
+      )
+    }
+    return { userPoolId: args.userPoolId, region: args.region, explicit: true }
+  }
+
+  const outputsPath = resolve(process.cwd(), 'amplify_outputs.json')
+  if (!existsSync(outputsPath)) {
+    throw new CliError(
+      'No amplify_outputs.json found. Deploy a sandbox first (`npm run sandbox:once`), ' +
+        'or name the pool with --user-pool-id and --region.',
+    )
+  }
+
+  const outputs = JSON.parse(readFileSync(outputsPath, 'utf8')) as {
+    auth?: { user_pool_id?: string; aws_region?: string }
+  }
+  const userPoolId = outputs.auth?.user_pool_id
+  const region = outputs.auth?.aws_region
+
+  if (!userPoolId || !region) {
+    throw new CliError('amplify_outputs.json has no auth.user_pool_id / auth.aws_region.')
+  }
+
+  // The committed CI placeholder. Without this check the script fails later
+  // with an opaque Cognito error about a malformed pool id.
+  if (userPoolId.includes('XXXXXXXXX')) {
+    throw new CliError(
+      'amplify_outputs.json is the CI placeholder, not a real deployment.\n' +
+        'Run `npm run sandbox:once` first.',
+    )
+  }
+
+  return { userPoolId, region, explicit: false }
+}
+
+async function main(): Promise<void> {
+  const args = parseArgs(process.argv.slice(2))
+  const pool = resolvePool(args)
+  const client = new CognitoIdentityProviderClient({ region: pool.region })
+
+  console.log(`Pool:   ${pool.userPoolId} (${pool.region})`)
+  console.log(`User:   ${args.email}`)
+  console.log('')
+
+  if (args.action === 'create') {
+    try {
+      await client.send(
+        new AdminCreateUserCommand({
+          UserPoolId: pool.userPoolId,
+          Username: args.email,
+          UserAttributes: [
+            { Name: 'email', Value: args.email },
+            // Pre-verified: the operator running this already controls the
+            // address, and an unverified admin cannot complete a password
+            // reset later.
+            { Name: 'email_verified', Value: 'true' },
+          ],
+          // No TemporaryPassword: Cognito generates one and emails it. A
+          // password chosen here would end up in shell history.
+          DesiredDeliveryMediums: ['EMAIL'],
+        }),
+      )
+      console.log('Created. Cognito has emailed a temporary password.')
+      console.log('The account has NO capability until you also run --grant.')
+    } catch (error) {
+      if (error instanceof UsernameExistsException) {
+        console.log('That account already exists — nothing to do. Run --grant next.')
+      } else {
+        throw error
+      }
+    }
+    return
+  }
+
+  // Every remaining action needs the account to exist. Checking first turns a
+  // typo into a clear message rather than a Cognito exception.
+  try {
+    const user = await client.send(
+      new AdminGetUserCommand({ UserPoolId: pool.userPoolId, Username: args.email }),
+    )
+    console.log(`Status: ${user.UserStatus}`)
+  } catch (error) {
+    if (error instanceof UserNotFoundException) {
+      throw new CliError(
+        `No such account in this pool. Create it first:\n` +
+          `  npm run admin -- --create --email ${args.email}`,
+      )
+    }
+    throw error
+  }
+
+  const groupsOf = async (): Promise<string[]> => {
+    const result = await client.send(
+      new AdminListGroupsForUserCommand({ UserPoolId: pool.userPoolId, Username: args.email }),
+    )
+    return (result.Groups ?? []).map((group) => group.GroupName ?? '').filter(Boolean)
+  }
+
+  if (args.action === 'list') {
+    const groups = await groupsOf()
+    console.log(`Groups: ${groups.length > 0 ? groups.join(', ') : '(none)'}`)
+    return
+  }
+
+  if (args.action === 'grant') {
+    await client.send(
+      new AdminAddUserToGroupCommand({
+        UserPoolId: pool.userPoolId,
+        Username: args.email,
+        GroupName: GROUP.ADMIN,
+      }),
+    )
+    console.log(`Granted ${GROUP.ADMIN}. Groups: ${(await groupsOf()).join(', ')}`)
+    console.log('')
+    console.log('Sign out and back in — Cognito issues the groups claim at sign-in,')
+    console.log('so an existing session will not see this until it is refreshed.')
+    return
+  }
+
+  // revoke
+  const admins = await client.send(
+    new ListUsersInGroupCommand({ UserPoolId: pool.userPoolId, GroupName: GROUP.ADMIN, Limit: 2 }),
+  )
+  const adminCount = admins.Users?.length ?? 0
+
+  /**
+   * Refuse to remove the last administrator.
+   *
+   * Doing so locks everyone out of the admin surface permanently as far as the
+   * application is concerned — recovery requires AWS credentials and this
+   * script. Worth a guard, and worth an override for the case where that is
+   * genuinely the intent.
+   */
+  if (adminCount <= 1 && !args.yes) {
+    throw new CliError(
+      `Refusing to remove the last ${GROUP.ADMIN}. Nobody would be able to publish, and\n` +
+        'recovering needs AWS credentials. Pass --yes if that is genuinely what you want.',
+    )
+  }
+
+  await client.send(
+    new AdminRemoveUserFromGroupCommand({
+      UserPoolId: pool.userPoolId,
+      Username: args.email,
+      GroupName: GROUP.ADMIN,
+    }),
+  )
+  console.log(`Revoked ${GROUP.ADMIN}. Groups: ${(await groupsOf()).join(', ') || '(none)'}`)
+}
+
+main().catch((error: unknown) => {
+  if (error instanceof CliError) {
+    if (error.message) console.error(`\n${error.message}\n`)
+    if (error.showUsage) console.error(USAGE)
+    process.exit(1)
+  }
+  console.error(error)
+  process.exit(1)
+})

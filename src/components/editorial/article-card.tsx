@@ -1,105 +1,80 @@
-import Image from 'next/image'
 import Link from 'next/link'
-import { Clock3, MessageCircle } from 'lucide-react'
+
 import type { ArticleCard as ArticleCardData } from '@/lib/amplify/queries'
-import { formatDate } from '@/lib/format'
-import { mediaUrl } from '@/lib/media'
-import { cardVariants } from '@/components/ui/card'
-import { cn } from '@/lib/utils/cn'
+import { formatShortDate, isoDateTime } from '@/lib/format'
+import { getDictionary } from '@/lib/i18n/hi'
 
-const typeLabels: Record<string, string> = {
-  NEWS: 'खबर',
-  OPINION: 'राय',
-  ANALYSIS: 'विश्लेषण',
-  EXPLAINER: 'समझिए',
-  FACT_CHECK: 'फैक्ट चेक',
-  INTERVIEW: 'इंटरव्यू',
-  EDITORIAL: 'संपादकीय',
-}
-
-export function articlePath(article: Pick<ArticleCardData, 'slug' | 'contentType'>): string {
-  return `${article.contentType === 'OPINION' ? '/opinion' : '/news'}/${article.slug}`
-}
-
+/**
+ * One article in the feed.
+ *
+ * THE WHOLE CARD IS THE LINK, but the anchor wraps only the TITLE and is
+ * stretched over the card with `after:absolute inset-0`. Wrapping the entire
+ * card in an `<a>` instead would give the link an accessible name consisting
+ * of the title, the summary, the byline and the date read out as one
+ * uninterrupted sentence — which is what a screen-reader user actually hears
+ * on most "clickable card" implementations. This way the link is named by the
+ * headline alone and the rest is ordinary text that happens to be inside the
+ * click target.
+ *
+ * `relative` on the article plus `isolate` keeps the stretched pseudo-element
+ * from escaping into a parent stacking context.
+ */
 export function ArticleCard({
   article,
   featured = false,
 }: {
   article: ArticleCardData
+  /** The lead story: larger headline, more prominent. Used for the first item
+   *  on the homepage so the feed has a clear entry point rather than reading
+   *  as an undifferentiated list. */
   featured?: boolean
 }) {
-  const image = mediaUrl(article.heroImageKey)
-  const path = articlePath(article)
+  const dict = getDictionary()
+  const published = formatShortDate(article.publishedAt)
+
   return (
-    <article
-      className={cn(
-        cardVariants({ variant: 'surface', padding: 'none' }),
-        'group overflow-hidden',
-        featured && 'md:grid md:grid-cols-2',
-      )}
-    >
-      {image && (
+    <article className="group relative isolate rounded-card border border-border bg-surface p-5 transition-shadow hover:shadow-card motion-reduce:transition-none sm:p-6">
+      <h2
+        className={
+          featured
+            ? 'font-display text-2xl font-bold text-balance sm:text-3xl'
+            : 'font-display text-lg font-bold text-balance sm:text-xl'
+        }
+      >
         <Link
-          href={path}
-          tabIndex={-1}
-          aria-hidden="true"
-          className={cn(
-            'relative block aspect-video overflow-hidden bg-bg-subtle',
-            featured && 'md:aspect-auto md:min-h-72',
-          )}
+          href={`/article/${article.slug}`}
+          className="group-hover:text-brand after:absolute after:inset-0 after:content-[''] focus-visible:outline-none"
         >
-          <Image
-            src={image}
-            alt=""
-            fill
-            sizes={featured ? '(min-width: 768px) 50vw, 100vw' : '(min-width: 1024px) 33vw, 100vw'}
-            // The featured card is the hero on / and /latest, which makes this
-            // the LCP element on the highest-traffic page. Without `priority`
-            // it is lazy-loaded like every card below the fold, so the largest
-            // paint waits for the image to be discovered by the scanner rather
-            // than being preloaded in the initial HTML. The article page
-            // already does this; the homepage did not.
-            priority={featured}
-            className="object-cover transition-transform duration-300 group-hover:scale-[1.02] motion-reduce:transition-none"
-          />
+          {article.title}
         </Link>
-      )}
-      <div className={cn('p-5', featured && 'md:flex md:flex-col md:justify-center md:p-8')}>
-        <div className="mb-3 flex flex-wrap items-center gap-2 text-xs font-bold text-accent">
-          <span>{typeLabels[article.contentType ?? ''] ?? article.contentType}</span>
-          {article.isBreaking && (
-            <span className="rounded-full bg-accent-subtle px-2 py-1">ब्रेकिंग</span>
-          )}
-        </div>
-        <h2
-          className={cn('font-display text-xl leading-snug font-bold', featured && 'sm:text-3xl')}
-        >
-          <Link href={path} className="text-fg no-underline group-hover:text-brand">
-            {article.title}
-          </Link>
-        </h2>
-        {article.excerpt && (
-          <p className="mt-3 line-clamp-3 text-sm text-fg-muted sm:text-base">{article.excerpt}</p>
+      </h2>
+
+      <p
+        className={
+          featured
+            ? 'mt-3 text-base text-fg-muted sm:text-lg'
+            : 'mt-2 line-clamp-3 text-sm text-fg-muted'
+        }
+      >
+        {article.summary}
+      </p>
+
+      <p className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fg-subtle">
+        {article.authorName && (
+          <>
+            <span>{article.authorName}</span>
+            <span aria-hidden="true">·</span>
+          </>
         )}
-        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg-subtle">
-          {article.authorDisplayName && <span>{article.authorDisplayName}</span>}
-          {article.publishedAt && (
-            <time dateTime={article.publishedAt}>{formatDate(article.publishedAt)}</time>
-          )}
-          {!!article.readingMinutes && (
-            <span className="inline-flex items-center gap-1">
-              <Clock3 aria-hidden="true" className="size-3.5" />
-              {article.readingMinutes} मिनट
-            </span>
-          )}
-          {!!article.commentCount && (
-            <span className="inline-flex items-center gap-1">
-              <MessageCircle aria-hidden="true" className="size-3.5" />
-              {article.commentCount}
-            </span>
-          )}
-        </div>
-      </div>
+        {published && <time dateTime={isoDateTime(article.publishedAt)}>{published}</time>}
+      </p>
+
+      {/* Visible affordance for a mouse user, redundant for everyone else —
+          hidden from assistive tech because the headline link already names
+          the destination and a second "पूरा पढ़ें" would just be noise. */}
+      <p aria-hidden="true" className="mt-3 text-sm font-semibold text-brand">
+        {dict.feed.readMore} <span aria-hidden="true">→</span>
+      </p>
     </article>
   )
 }
