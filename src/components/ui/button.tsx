@@ -1,10 +1,10 @@
 import { cva, type VariantProps } from 'class-variance-authority'
-import { Loader2 } from 'lucide-react'
 import { forwardRef, type ButtonHTMLAttributes } from 'react'
+
 import { cn } from '@/lib/utils/cn'
 
 const buttonVariants = cva(
-  // min-h-11 is the WCAG 2.5.5 44px target; it is on the base so no variant
+  // min-h-11 is the WCAG 2.5.5 44px target; it sits on the BASE so no variant
   // can accidentally drop below it.
   'inline-flex min-h-11 items-center justify-center gap-2 rounded-md text-sm font-semibold ' +
     'transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 ' +
@@ -14,7 +14,6 @@ const buttonVariants = cva(
     variants: {
       variant: {
         primary: 'bg-brand text-brand-fg hover:bg-brand-hover',
-        accent: 'bg-accent text-accent-fg hover:bg-accent-hover',
         outline: 'border border-border-strong bg-surface text-fg hover:bg-bg-subtle',
         ghost: 'text-fg hover:bg-bg-subtle',
         danger: 'bg-danger text-accent-fg hover:opacity-90',
@@ -24,7 +23,6 @@ const buttonVariants = cva(
         sm: 'px-3 py-1.5 text-xs',
         md: 'px-4 py-2',
         lg: 'px-6 py-3 text-base',
-        icon: 'min-w-11 p-2',
         full: 'w-full px-4 py-3 text-base',
       },
     },
@@ -34,10 +32,18 @@ const buttonVariants = cva(
 
 export interface ButtonProps
   extends ButtonHTMLAttributes<HTMLButtonElement>, VariantProps<typeof buttonVariants> {
-  /** Shows a spinner and disables the button. The label stays visible so the
-   *  button does not change width mid-submit. */
+  /**
+   * Shows a spinner AND disables the button.
+   *
+   * Coupling the two is the point: this is the component-level half of
+   * "prevent duplicate submissions". The other half is the idempotency key in
+   * the save handler, because a disabled button is a UX affordance and not a
+   * guarantee — it does nothing for a double submit that races the state
+   * update, or for a caller that is not this form.
+   */
   loading?: boolean
-  /** Announced to screen readers while `loading` is true. */
+  /** Announced to screen readers while `loading` is true. A spinner alone is
+   *  invisible to anyone not looking at it. */
   loadingLabel?: string
 }
 
@@ -53,11 +59,36 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       aria-busy={loading || undefined}
       {...props}
     >
-      {loading && <Loader2 aria-hidden="true" className="size-4 animate-spin" />}
+      {loading && <Spinner />}
+      {/* The label stays visible so the button does not change width
+          mid-submit, which is a layout shift under the user's cursor. */}
       {children}
       {loading && loadingLabel && <span className="sr-only">{loadingLabel}</span>}
     </button>
   )
 })
+
+/**
+ * Inline SVG rather than an icon package.
+ *
+ * This is the only icon in the application. Pulling in a whole icon library
+ * for it would add a dependency and a shared chunk to every page that renders
+ * a button, which on the public feed is every page.
+ */
+function Spinner() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className="size-4 animate-spin motion-reduce:animate-none"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+    >
+      <circle cx="12" cy="12" r="9" className="opacity-25" />
+      <path d="M21 12a9 9 0 0 0-9-9" strokeLinecap="round" />
+    </svg>
+  )
+}
 
 export { buttonVariants }
