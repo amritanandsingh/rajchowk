@@ -1,5 +1,4 @@
 import { defineBackend } from '@aws-amplify/backend'
-import { Stack } from 'aws-cdk-lib'
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront'
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins'
 import * as iam from 'aws-cdk-lib/aws-iam'
@@ -92,7 +91,22 @@ const backend = defineBackend({
   createMediaUploadUrl,
 })
 
-const stack = Stack.of(backend.data)
+/* ---------------------------------------------------------------------------
+ * THERE IS NO `const stack = …` HERE ANY MORE, AND THAT IS THE FIX FOR THE
+ * FAILURE THIS FILE CAUSED ONCE.
+ *
+ * It used to read `const stack = Stack.of(backend.data)`, and the name lied:
+ * that is the DATA NESTED stack, not the root. Anything scoped to it lands
+ * inside `data7552DF31` — which is fine for a construct that only talks to
+ * AppSync, and fatal for one that talks to the bucket. Deployment 14 on main
+ * died of exactly that; the reasoning is in section 5b.
+ *
+ * Every construct below therefore names the stack it wants explicitly —
+ * `backend.stack` for the root, `backend.storage.stack` for the bucket's — so
+ * that the choice is made at the point of use by someone who can see what the
+ * construct references, rather than inherited from a variable at the top of
+ * the file that reads like it means "the stack".
+ * ------------------------------------------------------------------------- */
 
 /* ===========================================================================
  * 2. Cognito hardening
@@ -261,6 +275,51 @@ grantArticleTable(backend.setArticleStatus, ['GetItem', 'UpdateItem'])
 const mediaBucket = backend.storage.resources.bucket
 
 /**
+ * EVERY CLOUDFRONT CONSTRUCT BELOW GOES IN THE STORAGE STACK. This is
+ * load-bearing, and getting it wrong is what failed Deployment 14 on main:
+ *
+ *   [CloudformationStackCircularDependencyError] circular dependency found
+ *   between nested stacks [storage0EC3F24A, data7552DF31]
+ *
+ * The cause is invisible from this file, so it is written down here.
+ * `S3BucketOrigin.withOriginAccessControl()` does not merely READ the bucket's
+ * domain name. Inside `bind()` it also WRITES a statement onto the bucket's own
+ * resource policy, and that statement names the distribution:
+ *
+ *   "AWS:SourceArn": "arn:<partition>:cloudfront::<account>:distribution/<id>"
+ *
+ * A bucket policy always lands in the bucket's stack. So with the distribution
+ * in `data`, storage pointed at data — while the presign grant and the two
+ * environment variables below point data at storage. Two nested stacks each
+ * importing the other, which CloudFormation rejects.
+ *
+ * Putting the distribution where the bucket already lives makes the origin, the
+ * OAC, the bucket policy and the distribution one stack's business. What is
+ * left is three data → storage references, all pointing the same way — which is
+ * the direction `resourceGroupName: 'data'` already forces on the presign
+ * Lambda, since it is an AppSync resolver and cannot live anywhere else.
+ *
+ * DO NOT "tidy" this to the data stack, to `backend.stack`, or to a
+ * `backend.createStack('media')`. All three put the distribution somewhere the
+ * bucket policy has to reach across into, and all three restore the cycle — the
+ * root stack fails the same way one level up, because the storage nested stack
+ * would need the distribution as a parameter while the distribution needs the
+ * bucket's domain as an output.
+ *
+ * Note also that `cdk synth` will NOT catch a regression here. The rejection
+ * comes from CloudFormation's UpdateStack validation, so the only local check
+ * that proves this is a real `npm run sandbox:once` deploy.
+ *
+ * One related change would bring the cycle back by a different route: adding an
+ * `access` callback to `defineStorage`. Amplify builds those IAM policies with
+ * `new Policy(Stack.of(bucket), …)` and attaches them to the granted
+ * principal's role, so `allow.resource(createMediaUploadUrl)` would put a policy
+ * in storage attached to a role in data. That is a second, independent reason
+ * for the "no access callback" note in amplify/storage/resource.ts.
+ */
+const mediaStack = backend.storage.stack
+
+/**
  * Abort incomplete multipart uploads after a week.
  *
  * This is the first resource in the system with unbounded storage growth, and
@@ -292,7 +351,7 @@ backend.storage.resources.cfnResources.cfnBucket.lifecycleConfiguration = {
  * than on the app origin, because these objects are attacker-influenced in a
  * way the application's own responses are not.
  */
-const mediaHeaders = new cloudfront.ResponseHeadersPolicy(stack, 'MediaHeaders', {
+const mediaHeaders = new cloudfront.ResponseHeadersPolicy(mediaStack, 'MediaHeaders', {
   securityHeadersBehavior: {
     contentTypeOptions: { override: true },
     referrerPolicy: {
@@ -302,7 +361,7 @@ const mediaHeaders = new cloudfront.ResponseHeadersPolicy(stack, 'MediaHeaders',
   },
 })
 
-const mediaDistribution = new cloudfront.Distribution(stack, 'MediaDistribution', {
+const mediaDistribution = new cloudfront.Distribution(mediaStack, 'MediaDistribution', {
   comment: 'राज चौक — article images',
   defaultBehavior: {
     // OAC, not the legacy OAI, and not a public bucket policy. This is what
@@ -356,7 +415,9 @@ backend.createMediaUploadUrl.addEnvironment('MEDIA_CDN_DOMAIN', mediaDistributio
 backend.addOutput({
   custom: {
     environment: isProduction ? 'production' : (branch ?? 'sandbox'),
-    region: stack.region,
+    // The root stack, not a nested one — though both resolve to the same
+    // `AWS::Region` pseudo-parameter, so this is a rename, not a change.
+    region: backend.stack.region,
     /**
      * The image CDN host, published here rather than set as a NEXT_PUBLIC_ env
      * var because CloudFront assigns it at deploy time and it differs per
