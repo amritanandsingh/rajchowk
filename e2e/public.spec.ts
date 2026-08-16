@@ -40,6 +40,11 @@ test.describe('public feed', () => {
     expect(headers['x-frame-options']).toBe('DENY')
     expect(headers['content-security-policy']).toContain("frame-ancestors 'none'")
     expect(headers['content-security-policy']).toContain("object-src 'none'")
+    // The article image CDN. Without this every published image is blocked,
+    // and it fails silently in the console rather than breaking a build — so
+    // it is pinned here where a CSP edit will trip over it.
+    expect(headers['content-security-policy']).toContain('img-src')
+    expect(headers['content-security-policy']).toContain('https://*.cloudfront.net')
     // Next advertises its own presence by default; a version number is free
     // reconnaissance.
     expect(headers['x-powered-by']).toBeUndefined()
@@ -128,6 +133,122 @@ test.describe('public feed', () => {
   })
 })
 
+test.describe('search', () => {
+  test('the feed offers a search box that needs no JavaScript', async ({ page }) => {
+    await page.goto('/')
+
+    const search = page.getByRole('search')
+    await expect(search).toBeVisible()
+    // A GET form is the whole mechanism: the URL is the state, so a result
+    // page is shareable and works before hydration. A POST or an onSubmit
+    // handler here would end all three properties.
+    await expect(search).toHaveAttribute('method', 'get')
+    await expect(page.getByRole('searchbox', { name: 'लेख खोजें' })).toBeVisible()
+  })
+
+  test('submitting puts the term in the URL', async ({ page }) => {
+    await page.goto('/')
+
+    await page.getByRole('searchbox', { name: 'लेख खोजें' }).fill('चुनाव')
+    await page.getByRole('button', { name: 'खोजें' }).click()
+
+    await expect(page).toHaveURL(/\?q=/)
+    // The term survives the round trip, so a second search does not start from
+    // an empty field.
+    await expect(page.getByRole('searchbox', { name: 'लेख खोजें' })).toHaveValue('चुनाव')
+  })
+
+  test('a search with no matches says so, and does not claim the site is empty', async ({
+    page,
+  }) => {
+    // With no reachable API the search degrades to zero results. The copy must
+    // still be the search copy: telling a reader "nothing has been published"
+    // is a different and false claim.
+    await page.goto('/?q=चुनाव')
+
+    await expect(page.getByRole('status')).toContainText('कोई लेख नहीं मिला')
+    await expect(page.getByRole('status')).not.toContainText('अभी कोई लेख प्रकाशित नहीं हुआ है')
+  })
+
+  test('offers a way back to the full feed from a search', async ({ page }) => {
+    await page.goto('/?q=चुनाव')
+    await page.getByRole('link', { name: 'खोज हटाएँ' }).click()
+
+    await expect(page).toHaveURL(/\/$/)
+    await expect(page.getByRole('status')).toContainText('अभी कोई लेख प्रकाशित नहीं हुआ है')
+  })
+
+  test('a search page does not overflow horizontally', async ({ page }) => {
+    // The input and its button sit in a flex row; a flex item's default
+    // min-width is auto, not 0, which is how this overflows on a 412px screen.
+    await page.goto('/?q=' + encodeURIComponent('क'.repeat(80)))
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    )
+    expect(overflow).toBe(false)
+  })
+
+  test('has no detectable accessibility violations while searching', async ({ page }) => {
+    await page.goto('/?q=चुनाव')
+
+    const results = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+      .analyze()
+
+    expect(results.violations).toEqual([])
+  })
+})
+
+test.describe('about', () => {
+  test('renders the publication’s purpose with the chrome intact', async ({ page }) => {
+    await page.goto('/about')
+
+    await expect(page.getByRole('heading', { level: 1, name: 'परिचय' })).toBeVisible()
+    await expect(page.getByRole('banner')).toBeVisible()
+    await expect(page.getByRole('contentinfo')).toBeVisible()
+  })
+
+  test('needs no backend, so it renders even when AppSync is unreachable', async ({ page }) => {
+    // Static copy. If this ever starts failing, something gave the page a data
+    // dependency it should not have.
+    const response = await page.goto('/about')
+    expect(response?.status()).toBe(200)
+  })
+
+  test('is reachable from the masthead on every page', async ({ page }) => {
+    await page.goto('/')
+    await page.getByRole('banner').getByRole('link', { name: 'परिचय' }).click()
+
+    await expect(page).toHaveURL(/\/about$/)
+  })
+
+  test('links back to the feed', async ({ page }) => {
+    await page.goto('/about')
+    await page.getByRole('link', { name: /सभी लेख/ }).click()
+    await expect(page).toHaveURL(/\/$/)
+  })
+
+  test('does not overflow horizontally', async ({ page }) => {
+    await page.goto('/about')
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    )
+    expect(overflow).toBe(false)
+  })
+
+  test('has no detectable accessibility violations', async ({ page }) => {
+    await page.goto('/about')
+
+    const results = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+      .analyze()
+
+    expect(results.violations).toEqual([])
+  })
+})
+
 test.describe('robots and sitemap', () => {
   test('robots.txt disallows /admin and points at the sitemap', async ({ request }) => {
     const response = await request.get('/robots.txt')
@@ -145,5 +266,14 @@ test.describe('robots and sitemap', () => {
     expect(body).toContain('<urlset')
     // The homepage is always present; article URLs are added as they publish.
     expect(body).toContain('<loc>')
+  })
+
+  test('sitemap.xml lists /about but never a search result', async ({ request }) => {
+    const body = await (await request.get('/sitemap.xml')).text()
+
+    expect(body).toContain('/about')
+    // `?q=` is an unbounded URL space built from user input. Listing it invites
+    // a crawler to index a different page for every word in the language.
+    expect(body).not.toContain('?q=')
   })
 })

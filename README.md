@@ -55,12 +55,16 @@ There is a quieter hazard worth keeping. `ampx sandbox` derives its stack name f
 ```
 Reader (anonymous, no account)
    │
-   └─► Next.js on Amplify Hosting SSR ── ISR, revalidate 60s
+   └─► Next.js on Amplify Hosting SSR
+          │  /         dynamic — reads ?q= for search
+          │  /article/ ISR, revalidate 60s
+          │  /about    static — copy only, no data
           │  server-only Amplify client, API-key auth
-          └─► AppSync ── listPublishedArticles / getPublishedArticleBySlug
+          └─► AppSync ── listPublishedArticles / searchPublishedArticles
+                 │        / getPublishedArticleBySlug
                  │        (APPSYNC_JS resolvers — no Lambda, no cold start)
                  └─► DynamoDB Article
-                        ├─ GSI articlesByFeedKeyAndPublishedAt  (sparse — the feed)
+                        ├─ GSI articlesByFeedKeyAndPublishedAt  (sparse — feed AND search)
                         └─ GSI articlesBySlug                   (the article page)
 
 Administrator (Cognito, ADMIN group)
@@ -112,7 +116,13 @@ Trade-off, stated because §6 of the specification asks for it: the feed index h
 | **Lambda `set-article-status`** | Publish/unpublish. Scoped IAM: `GetItem`, `UpdateItem` only.                                                                                                                                                |
 | **Amplify Hosting SSR**         | Next.js compute + CDN.                                                                                                                                                                                      |
 
-Not created, deliberately: no S3, no SES, no OpenSearch, no Redis, no VPC, no always-on compute.
+| **S3 bucket** (article images) | Private. No public policy, no ACLs, no identity-pool access rules — see `amplify/storage/resource.ts`. Reached by exactly two principals: the presign Lambda (`s3:PutObject` on `articles/*`) and the CloudFront distribution (read, via OAC). |
+| **CloudFront distribution** | Serves article images so the bucket can stay private. Origin Access Control, `nosniff` response header, immutable caching (keys carry a uuid, so a changed image is a new key and nothing is ever invalidated). |
+| **Lambda `create-media-upload-url`** | Issues a 5-minute presigned PUT for one object. Scoped IAM: `s3:PutObject` on `articles/*` only. |
+
+Not created, deliberately: no SES, no OpenSearch, no Redis, no VPC, no always-on compute, no image resizing.
+
+> **This list gained S3 on the image-upload change.** It previously read "no S3", which was true and is no longer. What has not changed is the reason that line existed: nothing here is public, nothing is always on, and the bucket has no access rules of its own. Adding a _second_ bucket, or opening this one, is the thing to argue about.
 
 ---
 
@@ -251,7 +261,9 @@ Then either **ड्राफ़्ट सहेजें** (save a draft — vi
 
 From the dashboard: **प्रकाशित करें** publishes a draft, **फ़ीड से हटाएँ** unpublishes, **संपादित करें** edits.
 
-> **A published article takes up to 60 seconds to appear on `/`.** That is the ISR window (`revalidate = 60` in `src/app/(public)/page.tsx`) — Amplify Hosting has no on-demand invalidation, so a TTL is the only freshness mechanism there is. The article is reachable at `/article/<slug>` immediately.
+> **A published article now appears on `/` immediately.** This used to say "up to 60 seconds", which was the ISR window. It no longer applies: `/` reads `?q=` for search, and `searchParams` is a dynamic API, so the route is server-rendered per request rather than prerendered. `revalidate = 60` is still exported and is now inert — it would only apply if the route were ever served statically again.
+>
+> This is a smaller change than it sounds. Amplify was already serving `/` from Lambda with `cache-control: no-store`, re-rendering every request; the TTL was buying nothing in production. The article is reachable at `/article/<slug>` immediately, as before, and that route is still ISR at 60s.
 
 ---
 
@@ -291,7 +303,7 @@ npm run verify:backend    # asserts the public API key CANNOT read the Article m
 
 ### Article creation and DynamoDB persistence
 
-Create a draft at `/admin/articles/new` → it appears under **ड्राफ़्ट** and **not** on `/`. Publish it → it appears on `/` within the 60-second ISR window and at `/article/<slug>`. Then confirm the row:
+Create a draft at `/admin/articles/new` → it appears under **ड्राफ़्ट** and **not** on `/`, and searching a word from its title finds nothing (the feed index is sparse, so a draft has no entry for search to reach). Publish it → it appears on `/` on the next request and at `/article/<slug>`, and is now findable by title or summary. Then confirm the row:
 
 ```bash
 # The table is Article-<appsyncApiId>-NONE.
@@ -379,6 +391,25 @@ The e2e suite runs against a deliberately **unreachable** backend, which is what
 ---
 
 ## Known behaviour worth knowing about
+
+**Article images are uploaded by presigned URL, and three things about that are deliberate.**
+
+The editor asks `createMediaUploadUrl` for a signed PUT and sends the file straight to S3. The bytes never pass through AppSync or a Lambda, so there is no 6 MB payload ceiling and no compute time proportional to file size. The object key is derived **server-side** from the article id plus a fresh uuid — there is no filename, key or path argument on the mutation, because a filename is attacker-controlled and is exactly how a traversal would arrive.
+
+- **The handler never sees the file.** A declared content type is therefore not checked against the file's magic bytes, and it cannot be. What makes that survivable is downstream: images are served from a different origin than the app, and CloudFront sends `X-Content-Type-Options: nosniff`, so a mislabelled file is inert rather than executable. **SVG is refused outright** — it is the one image-shaped format that is a script container, and `src/lib/domain/media.ts` says so at the point of refusal.
+- **Nothing is garbage-collected.** Deleting an article, or removing an image from its Markdown, leaves the object in the bucket. Only incomplete multipart uploads expire (7 days). This is the first resource here with unbounded growth; a cleanup job would be expressible because everything is grouped under `articles/<id>/`, but none exists.
+- **Nothing is resized.** A 5 MB photo is served at 5 MB to every reader. The 5 MB cap in `MEDIA_LIMITS` is the only thing standing between an article and a very slow page. Image optimisation is the obvious next step and was left out on purpose.
+
+Rendering an image needed **three** changes to `src/lib/markdown/sanitize-schema.ts`, and they only work together: `img` in `tagNames`, `img: ['src','alt','title']` in `attributes`, and **`src: ['http','https']` in `protocols`**. That last one is easy to miss — the schema replaces `defaultSchema.protocols` wholesale rather than merging, so omitting `src` does not inherit the default, it means `src` has no protocol allowlist at all. `src/lib/markdown/markdown-content.test.tsx` covers it.
+
+**Search matches titles and summaries, case-sensitively, and never article bodies.** `searchPublishedArticles` is the feed resolver with one extra filter clause — the same sparse `articlesByFeedKeyAndPublishedAt` index, the same hard-coded `PUBLISHED` partition key, so a draft is as unsearchable as it is unlistable.
+
+Two limits fall out of that, both deliberate:
+
+- **No body search.** The index projects `title` and `summary` but not `content`. Searching the body would mean a base-table read per candidate row. Adding `content` to the projection is not an option either — DynamoDB cannot alter a GSI's projection in place, so it would mean deleting and recreating the index, taking the live feed down.
+- **`contains` is case-sensitive** and DynamoDB has no `lower()`. Devanagari is caseless, so Hindi search is unaffected; a code-mixed Latin headline will miss on the wrong case ("Modi" vs "modi"). The fix is a lowercased `searchText` attribute written by the save Lambda — which would have to join the same GSI projection, so it carries the same rebuild cost.
+
+The one thing that is _not_ optional: **DynamoDB applies a filter AFTER `limit`**, so the resolver's limit is how many index items it reads, not how many match. A single-shot search returns zero results with a non-null `nextToken` whenever the matches sit past the first page read. `searchPublishedArticles` in `src/lib/amplify/queries.ts` loops until it has a full page of matches or hits a five-round-trip ceiling; `src/lib/amplify/queries.test.ts` is the regression test. Do not collapse that loop into one call.
 
 **A drifted lockfile broke a `main` deployment (2026-08-09, Amplify job 10).** `npm ci` refused the committed `package-lock.json` with 89 `Missing:` entries and 2 `Invalid:` version conflicts, failing the build before any code compiled.
 

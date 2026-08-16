@@ -1,6 +1,7 @@
 import 'server-only'
 
 import type { Schema } from '@/../amplify/data/resource'
+import { isSearchable, normalizeSearchTerm } from '@/lib/domain/search'
 import { publicServerClient } from './config'
 
 /**
@@ -142,6 +143,83 @@ export async function listPublishedArticles(
     items: (data.items ?? []).filter((item): item is ArticleCard => item !== null),
     nextToken: data.nextToken ?? null,
   }
+}
+
+/**
+ * Search published articles by title and summary.
+ *
+ * WHY THIS LOOPS, AND WHY THE LOOP CANNOT LIVE IN THE RESOLVER.
+ *
+ * DynamoDB applies a FilterExpression *after* `limit`, so the resolver's
+ * `limit` is how many index items it READS, not how many match. Ask for 12
+ * and DynamoDB reads 12 index entries, discards the ones that do not contain
+ * the term, and hands back whatever survives — commonly zero, with a
+ * nextToken pointing at the page where the match actually is. A single-shot
+ * search would therefore report "no articles found" for an article that
+ * plainly exists, and would do it more often the older the match is.
+ *
+ * The fix is to keep reading until we have a full page of MATCHES. That loop
+ * cannot go in the resolver: APPSYNC_JS has no await and no way to issue a
+ * second DynamoDB request from one invocation. So it goes here, in Node,
+ * where a `while` is just a `while`.
+ *
+ * The bound matters as much as the loop. `MAX_SEARCH_PAGES` caps the work a
+ * single crafted query can cause — without it, a term that matches nothing
+ * would walk the entire published partition on every request, which is a
+ * cheap denial-of-wallet against a public endpoint. Hitting the cap returns
+ * the matches found so far plus a nextToken, which is honest: fewer results
+ * than exist, never wrong ones.
+ *
+ * NO `unstable_cache` HERE EITHER. Read the note above — it applies with
+ * more force to a per-term key space.
+ */
+
+/** Index items read per round trip — a read budget, not a result count. */
+const SEARCH_SCAN = 100
+/** Ceiling on round trips per search. See the note above. */
+const MAX_SEARCH_PAGES = 5
+
+export async function searchPublishedArticles(
+  q: string,
+  options: { limit?: number } = {},
+): Promise<Page<ArticleCard>> {
+  // NFC-normalise, trim and cap. Normalising is what makes a decomposed
+  // Devanagari term match at all — see the note in domain/search.ts. Callers
+  // may have normalised already; it is idempotent.
+  const term = normalizeSearchTerm(q)
+
+  if (!isSearchable(term)) return emptyPage<ArticleCard>()
+
+  const client = publicServerClient()
+  const want = clampLimit(options.limit, 12)
+
+  const found: ArticleCard[] = []
+  let token: string | null = null
+  let pages = 0
+
+  do {
+    const result = await client.queries.searchPublishedArticles(
+      { q: term, limit: SEARCH_SCAN, nextToken: token },
+      PUBLIC_AUTH,
+    )
+
+    const data = unwrap('searchPublishedArticles', result)
+    // Already logged. Degrade to whatever we have rather than throwing away a
+    // good first page because the second round trip failed.
+    if (!data) break
+
+    // Both null and undefined are filtered: GraphQL list elements are nullable
+    // unless the SDL says otherwise, and the generated element type admits
+    // undefined as well. The resolver emits neither — this is what keeps that
+    // an assertion rather than a hope.
+    for (const item of data.items ?? []) {
+      if (item !== null && item !== undefined) found.push(item)
+    }
+    token = data.nextToken ?? null
+    pages += 1
+  } while (token && found.length < want && pages < MAX_SEARCH_PAGES)
+
+  return { items: found.slice(0, want), nextToken: token }
 }
 
 /**

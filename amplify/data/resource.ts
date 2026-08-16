@@ -1,5 +1,6 @@
 import { a, defineData, type ClientSchema } from '@aws-amplify/backend'
 
+import { createMediaUploadUrl } from '../functions/create-media-upload-url/resource'
 import { saveArticle } from '../functions/save-article/resource'
 import { setArticleStatus } from '../functions/set-article-status/resource'
 
@@ -270,6 +271,24 @@ const schema = a.schema({
     status: a.string(),
   }),
 
+  /**
+   * The result of asking for somewhere to put an image.
+   *
+   * Separate from ArticleMutationResult because it carries a CREDENTIAL —
+   * `uploadUrl` is a signed, time-limited grant to write one specific object.
+   * Folding it into the general article result would mean every save response
+   * carried a nullable field that is sometimes a capability, which is the kind
+   * of thing that ends up logged.
+   */
+  MediaUploadResult: a.customType({
+    ok: a.boolean().required(),
+    code: a.string(),
+    /** Presigned PUT target. Expires in minutes; never persisted. */
+    uploadUrl: a.string(),
+    /** The durable CDN URL that goes into the article's Markdown. */
+    mediaUrl: a.string(),
+  }),
+
   /* =====================================================================
    * Public queries — APPSYNC_JS, no Lambda, no cold start
    *
@@ -290,6 +309,35 @@ const schema = a.schema({
       a.handler.custom({
         dataSource: a.ref('Article'),
         entry: './resolvers/list-published-articles.js',
+      }),
+    ),
+
+  /**
+   * Search across published titles and summaries.
+   *
+   * Returns `PublicArticleFeed` — the same shape as the feed, deliberately.
+   * A search result IS a feed item, so a separate custom type would be a
+   * second allowlist to keep in sync with the first, and the day they drifted
+   * is the day a field leaks through one but not the other.
+   *
+   * `limit` is a READ budget, not a result count: DynamoDB applies the filter
+   * after the limit, so this query can legitimately return zero items with a
+   * non-null nextToken. Callers must paginate until nextToken is null —
+   * src/lib/amplify/queries.ts is the only caller and does exactly that.
+   */
+  searchPublishedArticles: a
+    .query()
+    .arguments({
+      q: a.string().required(),
+      limit: a.integer(),
+      nextToken: a.string(),
+    })
+    .returns(a.ref('PublicArticleFeed'))
+    .authorization((allow) => [allow.publicApiKey()])
+    .handler(
+      a.handler.custom({
+        dataSource: a.ref('Article'),
+        entry: './resolvers/search-published-articles.js',
       }),
     ),
 
@@ -366,6 +414,33 @@ const schema = a.schema({
     .returns(a.ref('ArticleMutationResult'))
     .authorization((allow) => [allow.group(ADMIN)])
     .handler(a.handler.function(setArticleStatus)),
+
+  /**
+   * Ask for a short-lived, single-object URL to upload one article image to.
+   *
+   * A mutation rather than a query even though it reads nothing: it mints a
+   * credential, which is a side effect, and it must never be cached, batched
+   * or retried by a client that thinks queries are safe to replay.
+   *
+   * NOTE WHAT IS NOT AN ARGUMENT: there is no key, no path, no filename. The
+   * object key is derived server-side from `articleId` plus a fresh uuid (see
+   * mediaKeyFor in src/lib/domain/media.ts), so a caller cannot influence
+   * WHERE the signed grant points — only that it exists. A filename is
+   * attacker-controlled and is exactly how a traversal would arrive.
+   *
+   * `byteSize` and `contentType` are signed into the URL, so they bound the
+   * upload rather than merely describing it.
+   */
+  createMediaUploadUrl: a
+    .mutation()
+    .arguments({
+      articleId: a.id().required(),
+      contentType: a.string().required(),
+      byteSize: a.integer().required(),
+    })
+    .returns(a.ref('MediaUploadResult'))
+    .authorization((allow) => [allow.group(ADMIN)])
+    .handler(a.handler.function(createMediaUploadUrl)),
 })
 
 /**

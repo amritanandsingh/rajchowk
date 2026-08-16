@@ -1,11 +1,15 @@
 import { defineBackend } from '@aws-amplify/backend'
 import { Stack } from 'aws-cdk-lib'
+import * as cloudfront from 'aws-cdk-lib/aws-cloudfront'
+import * as origins from 'aws-cdk-lib/aws-cloudfront-origins'
 import * as iam from 'aws-cdk-lib/aws-iam'
 
 import { auth } from './auth/resource'
 import { data } from './data/resource'
+import { createMediaUploadUrl } from './functions/create-media-upload-url/resource'
 import { saveArticle } from './functions/save-article/resource'
 import { setArticleStatus } from './functions/set-article-status/resource'
+import { storage } from './storage/resource'
 
 /* ===========================================================================
  * 0. Synth-time guards — these run BEFORE any AWS call
@@ -82,8 +86,10 @@ if (synthRegion && synthRegion !== EXPECTED_REGION && process.env.ALLOW_ANY_REGI
 const backend = defineBackend({
   auth,
   data,
+  storage,
   saveArticle,
   setArticleStatus,
+  createMediaUploadUrl,
 })
 
 const stack = Stack.of(backend.data)
@@ -237,6 +243,113 @@ grantArticleTable(backend.saveArticle, ['GetItem', 'PutItem', 'UpdateItem', 'Que
 grantArticleTable(backend.setArticleStatus, ['GetItem', 'UpdateItem'])
 
 /* ===========================================================================
+ * 5b. Article images — a private bucket behind a CloudFront distribution
+ *
+ * THE BUCKET IS NEVER PUBLIC. Nothing below opens it to the internet: readers
+ * reach objects only through the distribution, which authenticates to S3 with
+ * Origin Access Control. A direct S3 URL returns 403, and that is asserted
+ * during sandbox verification rather than assumed.
+ *
+ * The alternative considered and rejected was serving images from the Next.js
+ * origin at /media/…. It needs `s3:GetObject` on the Amplify Hosting SSR
+ * compute role, and that role is not reachable from this file — attaching the
+ * policy is a console step, invisible to this repository, that a new
+ * environment would silently omit and then serve broken images. Everything
+ * else here is infrastructure-as-code; that would not have been.
+ * ======================================================================== */
+
+const mediaBucket = backend.storage.resources.bucket
+
+/**
+ * Abort incomplete multipart uploads after a week.
+ *
+ * This is the first resource in the system with unbounded storage growth, and
+ * a failed browser upload leaves parts that are invisible in the console but
+ * billed. Given how much of this repository is about orphaned resources that
+ * are still costing money, silence here would have been the wrong default.
+ *
+ * Note there is NO expiry rule on the objects themselves — an article image
+ * must outlive the article's edit history. Orphaned images (uploaded, then the
+ * Markdown reference removed) are not collected; see the README.
+ */
+backend.storage.resources.cfnResources.cfnBucket.lifecycleConfiguration = {
+  rules: [
+    {
+      id: 'AbortIncompleteUploads',
+      status: 'Enabled',
+      abortIncompleteMultipartUpload: { daysAfterInitiation: 7 },
+    },
+  ],
+}
+
+/**
+ * `nosniff` on every image response.
+ *
+ * The presign handler never sees the bytes it authorises, so a file's declared
+ * content type is not verified against its actual contents. This header is the
+ * control that makes that survivable: a mislabelled HTML file stored as
+ * `image/png` is rendered inert rather than executed. It matters more here
+ * than on the app origin, because these objects are attacker-influenced in a
+ * way the application's own responses are not.
+ */
+const mediaHeaders = new cloudfront.ResponseHeadersPolicy(stack, 'MediaHeaders', {
+  securityHeadersBehavior: {
+    contentTypeOptions: { override: true },
+    referrerPolicy: {
+      referrerPolicy: cloudfront.HeadersReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN,
+      override: true,
+    },
+  },
+})
+
+const mediaDistribution = new cloudfront.Distribution(stack, 'MediaDistribution', {
+  comment: 'राज चौक — article images',
+  defaultBehavior: {
+    // OAC, not the legacy OAI, and not a public bucket policy. This is what
+    // lets the bucket stay private while the images stay public.
+    origin: origins.S3BucketOrigin.withOriginAccessControl(mediaBucket),
+    viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+    // Images are immutable — the key contains a uuid, so a changed image is a
+    // new key. Nothing needs to be invalidated, ever.
+    cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
+    allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD,
+    responseHeadersPolicy: mediaHeaders,
+    compress: true,
+  },
+  // PRICE_CLASS_ALL would put edges in regions with no readers. India, plus
+  // the diaspora that Europe and North America edges already cover, is served
+  // by 200 — and it is materially cheaper.
+  priceClass: cloudfront.PriceClass.PRICE_CLASS_200,
+  httpVersion: cloudfront.HttpVersion.HTTP2_AND_3,
+  enableIpv6: true,
+})
+
+/**
+ * Grant the presign handler the one action it performs.
+ *
+ * Same discipline as grantArticleTable above: an explicit statement rather
+ * than `bucket.grantPut()`, which also grants `s3:PutObjectAcl` and
+ * `s3:Abort*`. This function puts objects under one prefix and does nothing
+ * else — it cannot read, cannot list, cannot delete, and cannot touch anything
+ * outside `articles/`.
+ *
+ * Worth being precise about what this permission is for: the LAMBDA never
+ * uploads anything. It holds this so that it can SIGN a request the browser
+ * then makes, and a presigned URL can never convey more authority than the
+ * signer has. Narrowing this narrows every URL it issues.
+ */
+backend.createMediaUploadUrl.resources.lambda.addToRolePolicy(
+  new iam.PolicyStatement({
+    sid: 'PutArticleMedia',
+    actions: ['s3:PutObject'],
+    resources: [mediaBucket.arnForObjects('articles/*')],
+  }),
+)
+
+backend.createMediaUploadUrl.addEnvironment('MEDIA_BUCKET_NAME', mediaBucket.bucketName)
+backend.createMediaUploadUrl.addEnvironment('MEDIA_CDN_DOMAIN', mediaDistribution.domainName)
+
+/* ===========================================================================
  * 6. Outputs consumed by the Next.js app
  * ======================================================================== */
 
@@ -244,6 +357,15 @@ backend.addOutput({
   custom: {
     environment: isProduction ? 'production' : (branch ?? 'sandbox'),
     region: stack.region,
+    /**
+     * The image CDN host, published here rather than set as a NEXT_PUBLIC_ env
+     * var because CloudFront assigns it at deploy time and it differs per
+     * environment — a hand-maintained variable would be one more thing to get
+     * wrong on a new branch. The app never reads this: the URL is baked into
+     * an article's Markdown when the image is uploaded. It is here so an
+     * operator can find the distribution without opening the console.
+     */
+    mediaUrl: `https://${mediaDistribution.domainName}`,
   },
 })
 

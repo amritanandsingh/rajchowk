@@ -16,10 +16,47 @@
 export const hi = {
   siteName: 'राज चौक',
   tagline: 'विचार और विश्लेषण',
+  /** The `<meta name="description">` for the site as a whole. It lived inline
+   *  in src/app/layout.tsx until the About page gave it somewhere to belong. */
+  siteDescription: 'विचार, विश्लेषण और लेख।',
 
   nav: {
     home: 'मुखपृष्ठ',
+    about: 'परिचय',
     skipToContent: 'मुख्य सामग्री पर जाएँ',
+  },
+
+  /**
+   * The About page.
+   *
+   * `body` is an array rather than one string because each entry is a separate
+   * <p>: joining them with \n\n would need a markdown renderer to split them
+   * again, and the copy is fixed rather than authored.
+   */
+  about: {
+    title: 'परिचय',
+    lead: 'राज चौक विचार और विश्लेषण का एक खुला मंच है।',
+    body: [
+      'चौक वह जगह है जहाँ रास्ते आकर मिलते हैं और लोग ठहरकर बात करते हैं। यह पत्रिका उसी विचार पर बनी है — समाज, राजनीति और संस्कृति पर सोचकर लिखी गई बात, एक ऐसी जगह पर जहाँ पहुँचने के लिए किसी अनुमति की ज़रूरत न हो।',
+      'यहाँ प्रकाशित हर लेख सबके लिए खुला है। पढ़ने के लिए न कोई खाता बनाना पड़ता है, न कोई शुल्क देना पड़ता है। कोई विज्ञापन नहीं, कोई पॉपअप नहीं।',
+      'लेख हमारे संपादक लिखते और प्रकाशित करते हैं। हम कम लिखते हैं, पर ठहरकर लिखते हैं — हर रोज़ की सुर्खियों के पीछे भागने के बजाय उन सवालों पर, जो कुछ हफ़्ते बाद भी उतने ही ज़रूरी रहें।',
+    ],
+  },
+
+  /** The feed search box, and the results view it produces on the homepage. */
+  search: {
+    /** Visually hidden — the placeholder and the button carry the visible
+     *  affordance, but a control still needs a real label. */
+    label: 'लेख खोजें',
+    placeholder: 'शीर्षक या सारांश में खोजें…',
+    submit: 'खोजें',
+    clear: 'खोज हटाएँ',
+    /** Rendered as `खोज परिणाम: “<term>”` by the homepage. */
+    resultsFor: 'खोज परिणाम',
+    empty: {
+      title: 'कोई लेख नहीं मिला',
+      description: 'दूसरे शब्दों से कोशिश करें, या नीचे से खोज हटाकर सभी लेख देखें।',
+    },
   },
 
   feed: {
@@ -99,6 +136,18 @@ export const hi = {
       contentHint: 'मार्कडाउन चलेगा — ## उपशीर्षक, **मोटा**, [कड़ी](https://…)।',
       slug: 'URL (वैकल्पिक)',
       slugHint: 'खाली छोड़ने पर अपने आप बन जाएगा। केवल छोटे अंग्रेज़ी अक्षर, अंक और हाइफ़न।',
+
+      image: {
+        label: 'चित्र जोड़ें',
+        hint: 'JPG, PNG या WebP, अधिकतम 5 MB। चित्र वहीं जुड़ेगा जहाँ कर्सर है।',
+        alt: 'चित्र का विवरण',
+        altHint: 'नेत्रहीन पाठकों और खोज इंजनों के लिए — चित्र में क्या दिख रहा है।',
+        choose: 'चित्र चुनें',
+        uploading: 'चित्र चढ़ाया जा रहा है…',
+        uploaded: 'चित्र जुड़ गया।',
+        /** Shown under the field after a successful upload, above the thumbnails. */
+        added: 'इस बार जोड़े गए चित्र',
+      },
       save: 'ड्राफ़्ट सहेजें',
       saving: 'सहेजा जा रहा है…',
       saveAndPublish: 'सहेजें और प्रकाशित करें',

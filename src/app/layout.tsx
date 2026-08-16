@@ -17,7 +17,7 @@ export const metadata: Metadata = {
     default: `${dict.siteName} — ${dict.tagline}`,
     template: `%s | ${dict.siteName}`,
   },
-  description: 'विचार, विश्लेषण और लेख।',
+  description: dict.siteDescription,
   openGraph: {
     type: 'website',
     locale: 'hi_IN',
