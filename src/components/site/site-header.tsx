@@ -5,10 +5,16 @@ import { getDictionary } from '@/lib/i18n/hi'
 /**
  * The masthead.
  *
- * Deliberately almost empty. There is one public destination in this product,
- * so a navigation bar would be a row of one link pretending to be a menu. The
- * wordmark links home and that is the whole navigation — which is also what
- * keeps the reader's eye on the headline below it.
+ * This used to carry no <nav> at all, on the grounds that there was one public
+ * destination and a navigation bar would be a row of one link pretending to be
+ * a menu. That was true and is no longer: /about is a second destination, and
+ * a page nothing links to is a page nobody reads.
+ *
+ * It stays at exactly one link. The wordmark still goes home — that is the
+ * navigation for the feed, and giving "मुखपृष्ठ" its own entry beside a
+ * wordmark that already does the job is the row-of-one problem again, just
+ * moved. Search is not here either: it lives above the feed where the articles
+ * are, not in the chrome of every page.
  *
  * `sticky` with z-50: the skip link sits at z-60 so it can never render behind
  * this.
@@ -26,6 +32,14 @@ export function SiteHeader() {
           {dict.siteName}
         </Link>
         <span className="ms-3 hidden text-xs text-fg-subtle sm:inline">{dict.tagline}</span>
+
+        {/* ms-auto rather than a spacer div, so the nav sits at the inline end
+            in both directions if this ever renders under an RTL locale. */}
+        <nav className="ms-auto">
+          <Link href="/about" className="text-sm font-semibold text-fg-muted hover:text-brand">
+            {dict.nav.about}
+          </Link>
+        </nav>
       </div>
     </header>
   )

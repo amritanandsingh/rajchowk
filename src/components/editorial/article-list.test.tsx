@@ -74,6 +74,43 @@ describe('ArticleList', () => {
     render(<ArticleList articles={[]} />)
     expect(screen.queryByRole('list')).not.toBeInTheDocument()
   })
+
+  it('uses the caller’s empty copy when one is given', () => {
+    // Search needs this. "Nothing matched your search" and "nothing has been
+    // published yet" are different facts, and telling a reader the second when
+    // the first is true sends them away from a site full of articles.
+    render(
+      <ArticleList
+        articles={[]}
+        empty={{ title: 'कोई लेख नहीं मिला', description: 'दूसरे शब्दों से कोशिश करें।' }}
+      />,
+    )
+
+    expect(screen.getByText('कोई लेख नहीं मिला')).toBeInTheDocument()
+    expect(screen.queryByText('अभी कोई लेख प्रकाशित नहीं हुआ है')).not.toBeInTheDocument()
+    // Still announced, like every other empty state.
+    expect(screen.getByRole('status')).toBeInTheDocument()
+  })
+
+  it('falls back to the feed copy when no override is given', () => {
+    render(<ArticleList articles={[]} />)
+    expect(screen.getByText('अभी कोई लेख प्रकाशित नहीं हुआ है')).toBeInTheDocument()
+  })
+
+  it('prefers the error state over a custom empty state', () => {
+    // A failed search is not an empty search. If these collapsed, an outage
+    // would read as "no articles matched" and nobody would report it.
+    render(
+      <ArticleList
+        articles={[]}
+        failed
+        empty={{ title: 'कोई लेख नहीं मिला', description: 'दूसरे शब्दों से कोशिश करें।' }}
+      />,
+    )
+
+    expect(screen.getByRole('alert')).toHaveTextContent('लेख नहीं लाए जा सके')
+    expect(screen.queryByText('कोई लेख नहीं मिला')).not.toBeInTheDocument()
+  })
 })
 
 describe('ArticleCard accessibility', () => {

@@ -1,4 +1,4 @@
-import { useId, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react'
+import { useId, type ComponentPropsWithRef, type ReactNode } from 'react'
 
 import { cn } from '@/lib/utils/cn'
 
@@ -85,10 +85,23 @@ export function Field({
   )
 }
 
-export function TextInput({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
+export function TextInput({ className, ...props }: ComponentPropsWithRef<'input'>) {
   return <input className={cn(controlClass, className)} {...props} />
 }
 
-export function TextArea({ className, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+/**
+ * `ComponentPropsWithRef` rather than `TextareaHTMLAttributes`, so a caller can
+ * hold the element.
+ *
+ * The article editor needs one: inserting an uploaded image at the caret means
+ * reading `selectionStart`, and there is no way to learn that from React state
+ * when the field is uncontrolled — which it deliberately is, because the whole
+ * form reads its values through FormData on submit.
+ *
+ * No `forwardRef`. Under React 19 `ref` is an ordinary prop on a function
+ * component, so spreading `...props` onto the element passes it through.
+ * `Button` still uses forwardRef; that is older code, not a different rule.
+ */
+export function TextArea({ className, ...props }: ComponentPropsWithRef<'textarea'>) {
   return <textarea className={cn(controlClass, 'min-h-32 resize-y', className)} {...props} />
 }

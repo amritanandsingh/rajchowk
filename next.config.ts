@@ -21,7 +21,17 @@ const CSP = [
     ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
     : "script-src 'self' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
+  /**
+   * `*.cloudfront.net` is the article image CDN — a private S3 bucket fronted
+   * by an Origin Access Control distribution (see amplify/backend.ts).
+   *
+   * A wildcard rather than the exact distribution host because the domain is
+   * assigned by CloudFront at deploy time and differs per environment, while
+   * this policy is a build-time constant. The same reasoning already governs
+   * `connect-src https://*.amazonaws.com` two lines down. It is narrow in the
+   * way that matters: an `img-src` origin can render pixels, not run script.
+   */
+  "img-src 'self' data: blob: https://*.cloudfront.net",
   "font-src 'self' data:",
   // Cognito and AppSync. Scoped to AWS hosts rather than '*' so a compromised
   // script cannot exfiltrate to an arbitrary origin.

@@ -48,20 +48,45 @@ export const articleSchema: SanitizeOptions = {
     'code',
     'pre',
     'hr',
+    // Images are uploaded by an administrator and inserted as Markdown
+    // `![alt](url)`. Allowing the tag is only one third of what that needs —
+    // see `attributes.img` and `protocols.src` below. All three go together.
+    'img',
   ],
   attributes: {
     a: ['href', 'title'],
     // Language classes only, for syntax highlighting hooks. The pattern is
     // what stops an author reaching an arbitrary application style.
     code: [['className', /^language-[a-z0-9+-]+$/]],
+    /**
+     * `src`, `alt` and `title`, and nothing else.
+     *
+     * No `width`/`height` (a Markdown image cannot express them anyway), no
+     * `srcset`, and emphatically no `on*` — those are already excluded by the
+     * `'*': []` catch-all below, and this list does not re-admit them.
+     */
+    img: ['src', 'alt', 'title'],
     // Nothing else, on any element. This line is what removes every `on*`
     // handler, `style`, and `id` in one go.
     '*': [],
   },
+  /**
+   * NOTE THE SHAPE: this object REPLACES `defaultSchema.protocols` wholesale,
+   * it does not merge with it. Every attribute whose protocol matters must
+   * therefore be listed here, including ones the default already covered.
+   *
+   * That is why `src` is present. Omitting it does not fall back to the
+   * default `src: ['http','https']` — it means `src` has NO protocol
+   * allowlist at all, and `![x](javascript:…)` reaches the DOM. The omission
+   * was harmless while `img` was disallowed and `'*': []` stripped every
+   * `src`; it stopped being harmless the moment images were permitted above.
+   */
   protocols: {
     // No `javascript:`, no `data:`. safe-href.ts checks this again at render
     // time; the two are independent and both must pass.
     href: ['http', 'https', 'mailto'],
+    // Same rule for images, minus `mailto:`. safe-src.ts is the second check.
+    src: ['http', 'https'],
   },
   // Prefixes any generated id so a heading anchor cannot collide with — or
   // clobber — an id the application itself relies on.

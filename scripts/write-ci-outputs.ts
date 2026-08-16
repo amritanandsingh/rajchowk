@@ -94,7 +94,34 @@ const PLACEHOLDER = {
     authorization_types: ['API_KEY'],
     model_introspection: null as unknown,
   },
-  custom: { environment: 'ci', region: 'ap-south-1' },
+  /**
+   * The article image bucket.
+   *
+   * Present so the placeholder has the same SHAPE as a deployed config, not
+   * because anything reads it: uploads go through the createMediaUploadUrl
+   * mutation rather than through Amplify Storage's browser client, so nothing
+   * in the app calls `Amplify.configure`-driven storage APIs. A config that is
+   * structurally unlike production is how a shape mismatch reaches a real
+   * deploy before anyone notices.
+   */
+  storage: {
+    aws_region: 'ap-south-1',
+    bucket_name: 'amplify-placeholder-media-bucket',
+    buckets: [
+      {
+        name: 'rajchowkMedia',
+        bucket_name: 'amplify-placeholder-media-bucket',
+        aws_region: 'ap-south-1',
+      },
+    ],
+  },
+  custom: {
+    environment: 'ci',
+    region: 'ap-south-1',
+    // Unroutable on purpose, exactly like the AppSync endpoint above: a test
+    // that accidentally fetches an image must fail fast rather than reach out.
+    mediaUrl: 'https://placeholder.cloudfront.net',
+  },
 } as const
 
 /**

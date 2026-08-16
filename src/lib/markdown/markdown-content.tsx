@@ -5,6 +5,7 @@ import rehypeSanitize from 'rehype-sanitize'
 
 import { env } from '@/lib/env'
 import { isExternalHref, safeHref } from './safe-href'
+import { safeSrc } from './safe-src'
 import { articleSchema } from './sanitize-schema'
 
 /**
@@ -100,6 +101,49 @@ const MARKDOWN_COMPONENTS: Components = {
       <Link href={safe} className="text-brand underline hover:text-brand-hover">
         {children}
       </Link>
+    )
+  },
+
+  /**
+   * Article images, uploaded by an administrator and written as `![alt](url)`.
+   *
+   * THREE THINGS ARE LOAD-BEARING HERE.
+   *
+   * `safeSrc` is the render-time half of the two-check doctrine safe-href.ts
+   * describes — sanitize-schema.ts has already applied a protocol allowlist to
+   * the parsed tree, and this checks again on what React is about to mount. A
+   * rejected source renders NOTHING; falling back to the raw value would
+   * reinstate exactly what was just refused.
+   *
+   * `alt` is always a string, never undefined. `![](x.jpg)` is a legitimate
+   * way to mark an image decorative and must produce `alt=""` — an ABSENT alt
+   * is an axe `image-alt` violation, and e2e asserts zero violations, so the
+   * `?? ''` is what keeps a published article from failing the build.
+   *
+   * A plain `<img>` rather than `next/image`. The optimiser needs intrinsic
+   * width and height, and authored Markdown carries neither; `fill` would need
+   * a positioned ancestor this component cannot impose on article prose.
+   * `loading="lazy"` gets the part of the benefit that actually matters for a
+   * long article — images below the fold are not fetched until approached.
+   */
+  img({ src, alt, title }) {
+    const safe = safeSrc(typeof src === 'string' ? src : null, env.NEXT_PUBLIC_SITE_URL)
+    if (!safe) return null
+
+    return (
+      // next/image needs intrinsic dimensions that Markdown cannot express —
+      // see the note above this component.
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={safe}
+        alt={alt ?? ''}
+        title={title}
+        loading="lazy"
+        decoding="async"
+        // `my-6` matches the rhythm every other block element here sets; the
+        // stylesheet has no rule for images, so spacing has to come from here.
+        className="my-6 h-auto w-full rounded-card"
+      />
     )
   },
 

@@ -22,10 +22,24 @@ export function ArticleList({
   /** Renders the first item larger. Homepage only — a lead story needs a feed
    *  above it to lead. */
   featureFirst = false,
+  /**
+   * Overrides the "nothing published yet" copy.
+   *
+   * Search needs this and it is not cosmetic: a search that matches nothing
+   * would otherwise tell the reader "अभी कोई लेख प्रकाशित नहीं हुआ है" — no
+   * articles have been published — which is false, and which sends them away
+   * from a site that is in fact full of articles. Empty-because-you-searched
+   * and empty-because-nothing-exists are different facts.
+   *
+   * Declared `| undefined` explicitly: `exactOptionalPropertyTypes` is on, so
+   * an absent key and an explicit undefined are not the same type.
+   */
+  empty,
 }: {
   articles: readonly ArticleCardData[]
   failed?: boolean
   featureFirst?: boolean
+  empty?: { title: string; description: string } | undefined
 }) {
   const dict = getDictionary()
 
@@ -34,7 +48,8 @@ export function ArticleList({
   }
 
   if (articles.length === 0) {
-    return <EmptyState title={dict.feed.empty.title} description={dict.feed.empty.description} />
+    const state = empty ?? dict.feed.empty
+    return <EmptyState title={state.title} description={state.description} />
   }
 
   return (

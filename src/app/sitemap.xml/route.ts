@@ -23,6 +23,15 @@ export async function GET(): Promise<Response> {
 
   const urls = [
     { loc: absoluteUrl('/'), lastmod: items[0]?.publishedAt ?? null, priority: '1.0' },
+    /**
+     * Static copy, so there is no lastmod to report — omitting it is better
+     * than inventing one, which is what stamping today's date would be.
+     *
+     * `/?q=…` is deliberately absent and must stay absent: search results are
+     * an unbounded URL space built from user input, and listing them invites a
+     * crawler to index a different page for every word in the language.
+     */
+    { loc: absoluteUrl('/about'), lastmod: null, priority: '0.5' },
     ...items.map((article) => ({
       loc: absoluteUrl(`/article/${article.slug}`),
       lastmod: article.publishedAt ?? null,

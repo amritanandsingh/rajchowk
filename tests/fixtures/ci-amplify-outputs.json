@@ -476,6 +476,39 @@
               "attributes": []
             }
           }
+        },
+        "MediaUploadResult": {
+          "name": "MediaUploadResult",
+          "fields": {
+            "ok": {
+              "name": "ok",
+              "isArray": false,
+              "type": "Boolean",
+              "isRequired": true,
+              "attributes": []
+            },
+            "code": {
+              "name": "code",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
+            "uploadUrl": {
+              "name": "uploadUrl",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
+            "mediaUrl": {
+              "name": "mediaUrl",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            }
+          }
         }
       },
       "queries": {
@@ -487,6 +520,34 @@
           },
           "isRequired": false,
           "arguments": {
+            "limit": {
+              "name": "limit",
+              "isArray": false,
+              "type": "Int",
+              "isRequired": false
+            },
+            "nextToken": {
+              "name": "nextToken",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false
+            }
+          }
+        },
+        "searchPublishedArticles": {
+          "name": "searchPublishedArticles",
+          "isArray": false,
+          "type": {
+            "nonModel": "PublicArticleFeed"
+          },
+          "isRequired": false,
+          "arguments": {
+            "q": {
+              "name": "q",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            },
             "limit": {
               "name": "limit",
               "isArray": false,
@@ -608,12 +669,52 @@
               "isRequired": true
             }
           }
+        },
+        "createMediaUploadUrl": {
+          "name": "createMediaUploadUrl",
+          "isArray": false,
+          "type": {
+            "nonModel": "MediaUploadResult"
+          },
+          "isRequired": false,
+          "arguments": {
+            "articleId": {
+              "name": "articleId",
+              "isArray": false,
+              "type": "ID",
+              "isRequired": true
+            },
+            "contentType": {
+              "name": "contentType",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            },
+            "byteSize": {
+              "name": "byteSize",
+              "isArray": false,
+              "type": "Int",
+              "isRequired": true
+            }
+          }
         }
       }
     }
   },
+  "storage": {
+    "aws_region": "ap-south-1",
+    "bucket_name": "amplify-placeholder-media-bucket",
+    "buckets": [
+      {
+        "name": "rajchowkMedia",
+        "bucket_name": "amplify-placeholder-media-bucket",
+        "aws_region": "ap-south-1"
+      }
+    ]
+  },
   "custom": {
     "environment": "ci",
-    "region": "ap-south-1"
+    "region": "ap-south-1",
+    "mediaUrl": "https://placeholder.cloudfront.net"
   }
 }
